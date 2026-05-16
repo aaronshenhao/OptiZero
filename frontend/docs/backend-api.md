@@ -2,6 +2,53 @@
 
 The frontend is wired to call these routes and falls back to local mock responses until they exist.
 
+## Local connection
+
+Run the backend on port `8000`:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+`0.0.0.0` is a server bind address. Browser/client requests should use `localhost`, `127.0.0.1`, or the deployed backend hostname.
+
+In frontend development, Vite proxies relative `/api/*` requests to `http://127.0.0.1:8000`, so the frontend can keep calling `/api/optimizer/...` without CORS.
+
+```bash
+pnpm run dev
+```
+
+Frontend API behavior is controlled by env vars:
+
+```bash
+VITE_OPTIMIZER_API_MODE=fallback
+VITE_OPTIMIZER_API_BASE_URL=
+```
+
+Modes:
+
+- `live`: backend failures are surfaced to the UI.
+- `fallback`: backend failures use mock data so demos remain usable.
+- `mock`: backend is never called.
+
+For direct split-origin development, set:
+
+```bash
+VITE_OPTIMIZER_API_BASE_URL=http://localhost:8000
+```
+
+## Hosting guidance
+
+Preferred production setup: serve the frontend and backend behind one domain, route `/api/*` to FastAPI, and route all other paths to the frontend static app. This keeps frontend API calls relative and avoids browser CORS.
+
+Alternative setup: deploy the backend separately and set:
+
+```bash
+VITE_OPTIMIZER_API_BASE_URL=https://your-api-domain
+```
+
+If using split origins, backend CORS should be configured from environment variables and include the deployed frontend origin.
+
 ## `GET /api/optimizer/demo-data`
 
 Returns metadata for labels, default controls, and future richer visualizations.
@@ -49,7 +96,15 @@ Backend should apply `demand_multiplier` to product `min_demand` before construc
 
 ## `POST /api/optimizer/pareto`
 
-Runs the solver across carbon cap points and returns chart-ready results. For `tradeoff_required`, use the `protect_compliance` plan for profit, emissions, and demand met; otherwise use `protect_demand`.
+Runs the solver across carbon cap points and returns chart-ready results.
+
+Current backend compatibility:
+
+- Top-level point fields are interpreted as `protect_demand`.
+- `compliance_fallback`, when present, is interpreted as `protect_compliance`.
+- The frontend plots both as separate curves.
+
+Future preferred contract: return explicit `protect_demand` and `protect_compliance` objects for each point instead of the `compliance_fallback` name.
 
 ```json
 {
@@ -75,7 +130,14 @@ Runs the solver across carbon cap points and returns chart-ready results. For `t
       "total_emissions_kg": 150000000,
       "demand_met_pct": 94.2,
       "carbon_overage_kg": 0,
-      "unmet_demand_total_units": 1200
+      "unmet_demand_total_units": 1200,
+      "compliance_fallback": {
+        "profit_usd": 7600000,
+        "total_emissions_kg": 150000000,
+        "demand_met_pct": 88.1,
+        "carbon_overage_kg": 0,
+        "unmet_demand_total_units": 5100
+      }
     }
   ]
 }

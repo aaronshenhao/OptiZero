@@ -17,11 +17,16 @@ export type FactoryAllocation = ProductionAllocation;
 
 export type ParetoPoint = {
   carbonCap: number;
-  profit: number;
-  totalCO2: number;
+  demandProfit: number;
+  demandTotalCO2: number;
   demandMet: number;
-  carbonOverage: number;
-  unmetDemandUnits: number;
+  demandCarbonOverage: number;
+  demandUnmetDemandUnits: number;
+  complianceProfit?: number;
+  complianceTotalCO2?: number;
+  complianceDemandMet?: number;
+  complianceCarbonOverage?: number;
+  complianceUnmetDemandUnits?: number;
   decisionStatus: DecisionStatus;
 };
 
@@ -235,7 +240,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     }));
 
     try {
-      const capPointsTons = [50000, 100000, 150000, 200000, 250000, 300000, 400000, 500000, 650000, 800000, 1000000];
+      const capPointsTons = Array.from(new Set([
+        50000,
+        100000,
+        150000,
+        200000,
+        250000,
+        300000,
+        400000,
+        500000,
+        650000,
+        800000,
+        1000000,
+        scenario.carbonCap,
+      ])).sort((a, b) => a - b);
       const { carbon_cap_kg: ignoredCarbonCapKg, ...paretoScenario } = buildScenarioPolicy(scenario);
       void ignoredCarbonCapKg;
       const response = await generateParetoFrontier({
@@ -249,15 +267,34 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
           item.id === id
             ? {
                 ...item,
-                paretoFrontier: response.points.map((point) => ({
-                  carbonCap: kgToTons(point.carbon_cap_kg),
-                  profit: point.profit_usd,
-                  totalCO2: kgToTons(point.total_emissions_kg),
-                  demandMet: point.demand_met_pct,
-                  carbonOverage: kgToTons(point.carbon_overage_kg),
-                  unmetDemandUnits: point.unmet_demand_total_units,
-                  decisionStatus: point.decision_status,
-                })),
+                paretoFrontier: response.points.map((point) => {
+                  const compliancePoint =
+                    point.compliance_fallback ??
+                    (point.decision_status === "optimal"
+                      ? {
+                          profit_usd: point.profit_usd,
+                          total_emissions_kg: point.total_emissions_kg,
+                          demand_met_pct: point.demand_met_pct,
+                          carbon_overage_kg: point.carbon_overage_kg,
+                          unmet_demand_total_units: point.unmet_demand_total_units,
+                        }
+                      : undefined);
+
+                  return {
+                    carbonCap: kgToTons(point.carbon_cap_kg),
+                    demandProfit: point.profit_usd,
+                    demandTotalCO2: kgToTons(point.total_emissions_kg),
+                    demandMet: point.demand_met_pct,
+                    demandCarbonOverage: kgToTons(point.carbon_overage_kg),
+                    demandUnmetDemandUnits: point.unmet_demand_total_units,
+                    complianceProfit: compliancePoint?.profit_usd,
+                    complianceTotalCO2: compliancePoint ? kgToTons(compliancePoint.total_emissions_kg) : undefined,
+                    complianceDemandMet: compliancePoint?.demand_met_pct,
+                    complianceCarbonOverage: compliancePoint ? kgToTons(compliancePoint.carbon_overage_kg) : undefined,
+                    complianceUnmetDemandUnits: compliancePoint?.unmet_demand_total_units,
+                    decisionStatus: point.decision_status,
+                  };
+                }).sort((a, b) => a.carbonCap - b.carbonCap),
                 isParetoLoading: false,
                 paretoUpdatedAt: Date.now(),
               }

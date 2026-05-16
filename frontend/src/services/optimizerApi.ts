@@ -1,5 +1,10 @@
 export const KG_PER_TON = 1000;
 
+type ApiMode = "live" | "fallback" | "mock";
+
+const API_MODE = getApiMode();
+const API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_OPTIMIZER_API_BASE_URL);
+
 export type PlanMode = "protect_demand" | "protect_compliance";
 export type DecisionStatus = "optimal" | "tradeoff_required" | "infeasible";
 export type SolverStatus = "Optimal" | "Infeasible" | "Unbounded" | "Undefined" | string;
@@ -135,6 +140,13 @@ export type ParetoPointResponse = {
   demand_met_pct: number;
   carbon_overage_kg: number;
   unmet_demand_total_units: number;
+  compliance_fallback?: {
+    profit_usd: number;
+    total_emissions_kg: number;
+    demand_met_pct: number;
+    carbon_overage_kg: number;
+    unmet_demand_total_units: number;
+  };
 };
 
 export type ParetoResponse = {
@@ -198,8 +210,10 @@ export async function generateParetoFrontier(request: ParetoRequest): Promise<Pa
 }
 
 async function requestWithMockFallback<T>(path: string, body: unknown, createMock: () => T): Promise<T> {
+  if (API_MODE === "mock") return createMock();
+
   try {
-    const response = await fetch(path, {
+    const response = await fetch(getApiUrl(path), {
       method: body ? "POST" : "GET",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -207,9 +221,24 @@ async function requestWithMockFallback<T>(path: string, body: unknown, createMoc
 
     if (!response.ok) throw new Error(`Optimizer API returned ${response.status}`);
     return (await response.json()) as T;
-  } catch {
+  } catch (error) {
+    if (API_MODE === "live") throw error;
     return createMock();
   }
+}
+
+function getApiUrl(path: string) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
+function getApiMode(): ApiMode {
+  const mode = import.meta.env.VITE_OPTIMIZER_API_MODE;
+  if (mode === "live" || mode === "fallback" || mode === "mock") return mode;
+  return "fallback";
+}
+
+function normalizeBaseUrl(value: string | undefined) {
+  return value?.trim().replace(/\/+$/, "") ?? "";
 }
 
 function createMockDemoData(): DemoDataResponse {
@@ -411,10 +440,7 @@ function createMockParetoResponse(request: ParetoRequest): ParetoResponse {
         ...request.scenario,
         carbon_cap_kg: carbonCapKg,
       });
-      const plan =
-        solve.decision_status === "tradeoff_required" && solve.plans.protect_compliance
-          ? solve.plans.protect_compliance
-          : solve.plans.protect_demand;
+      const plan = solve.plans.protect_demand;
 
       return {
         carbon_cap_kg: carbonCapKg,
@@ -424,6 +450,16 @@ function createMockParetoResponse(request: ParetoRequest): ParetoResponse {
         demand_met_pct: plan.demand_met_pct ?? 0,
         carbon_overage_kg: plan.carbon_overage_kg ?? 0,
         unmet_demand_total_units: plan.unmet_demand_total_units ?? 0,
+        compliance_fallback:
+          solve.decision_status === "tradeoff_required" && solve.plans.protect_compliance
+            ? {
+                profit_usd: solve.plans.protect_compliance.total_profit_usd ?? 0,
+                total_emissions_kg: solve.plans.protect_compliance.total_emissions_kg ?? 0,
+                demand_met_pct: solve.plans.protect_compliance.demand_met_pct ?? 0,
+                carbon_overage_kg: solve.plans.protect_compliance.carbon_overage_kg ?? 0,
+                unmet_demand_total_units: solve.plans.protect_compliance.unmet_demand_total_units ?? 0,
+              }
+            : undefined,
       };
     }),
   };
