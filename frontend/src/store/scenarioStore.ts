@@ -1,9 +1,17 @@
 import { create } from "zustand";
+import { generateParetoFrontierMock, solveScenarioMock } from "../services/optimizerApi";
 
 export type FactoryAllocation = {
   facility_id: string;
   product_id: string;
   units_assigned: number;
+};
+
+export type ParetoPoint = {
+  carbonCap: number;
+  profit: number;
+  totalCO2: number;
+  status: "Optimal" | "Infeasible";
 };
 
 export type Scenario = {
@@ -23,6 +31,8 @@ export type Scenario = {
   allocations: FactoryAllocation[];
   status: "Optimal" | "Infeasible";
   errorMessage?: string;
+  paretoFrontier: ParetoPoint[];
+  paretoUpdatedAt?: number;
 };
 
 const createDefaultScenario = (id: string, name: string): Scenario => ({
@@ -38,6 +48,7 @@ const createDefaultScenario = (id: string, name: string): Scenario => ({
   demandMet: 100,
   allocations: [],
   status: "Optimal",
+  paretoFrontier: [],
 });
 
 export type ScenarioState = {
@@ -51,6 +62,7 @@ export type ScenarioState = {
   setActiveScenario: (id: string) => void;
   updateScenarioInputs: (id: string, inputs: Partial<Scenario>) => void;
   runSimulation: (id: string) => void; 
+  generateParetoFrontier: (id: string) => void;
 };
 
 export const useScenarioStore = create<ScenarioState>((set) => ({
@@ -61,8 +73,14 @@ export const useScenarioStore = create<ScenarioState>((set) => ({
     const newId = `scen-${Date.now()}`;
     const active = state.scenarios.find(s => s.id === state.activeScenarioId);
     let newScenario = createDefaultScenario(newId, name);
-    if(active) {
-       newScenario = { ...newScenario, carbonCap: active.carbonCap, factoryOutage: active.factoryOutage, demandSurge: active.demandSurge, allowUnmetDemand: active.allowUnmetDemand };
+    if (active) {
+      newScenario = {
+        ...newScenario,
+        carbonCap: active.carbonCap,
+        factoryOutage: active.factoryOutage,
+        demandSurge: active.demandSurge,
+        allowUnmetDemand: active.allowUnmetDemand,
+      };
     }
     return {
       scenarios: [...state.scenarios, newScenario],
@@ -92,27 +110,25 @@ export const useScenarioStore = create<ScenarioState>((set) => ({
       scenarios: state.scenarios.map(s => {
         if (s.id !== id) return s;
         
-        let status: "Optimal" | "Infeasible" = "Optimal";
-        let errorMessage: string | undefined = undefined;
-
-        if (s.carbonCap < 150000 && !s.allowUnmetDemand && s.demandSurge > 0.1) {
-            status = "Infeasible";
-            errorMessage = "Carbon cap too tight to meet minimum demand.";
-        }
-
-        const profit = Math.max(0, 15400000 - ((500000 - s.carbonCap) * 15) - (s.factoryOutage * 2000000));
-        const totalCO2 = Math.min(s.carbonCap, 450000 * (1 - s.factoryOutage));
+        const result = solveScenarioMock(s);
         
         return {
           ...s,
-          status,
-          errorMessage,
-          profit: status === "Optimal" ? profit : 0,
-          totalCO2: status === "Optimal" ? totalCO2 : 0,
-          capUtilization: status === "Optimal" ? Math.min(100, Math.max(0, (totalCO2 / s.carbonCap) * 100)) : 0,
-          demandMet: status === "Optimal" ? (s.factoryOutage > 0.2 && !s.allowUnmetDemand ? 92 : 100) : 0,
+          ...result,
         };
       })
     };
-  })
+  }),
+
+  generateParetoFrontier: (id: string) => set((state) => ({
+    scenarios: state.scenarios.map((scenario) => {
+      if (scenario.id !== id) return scenario;
+
+      return {
+        ...scenario,
+        paretoFrontier: generateParetoFrontierMock(scenario),
+        paretoUpdatedAt: Date.now(),
+      };
+    }),
+  })),
 }));

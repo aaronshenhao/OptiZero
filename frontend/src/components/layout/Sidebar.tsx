@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useScenarioStore } from "../../store/scenarioStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft, LayoutDashboard } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft, LayoutDashboard, Leaf } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export function Sidebar() {
@@ -24,7 +24,7 @@ export function Sidebar() {
   return (
     <div className={cn("flex flex-col border-r bg-muted/30 transition-all duration-300", isCollapsed ? "w-16 items-center" : "w-64")}>
       <div className="flex h-14 items-center justify-between border-b px-4">
-        {!isCollapsed && <span className="font-semibold flex items-center gap-2"><LayoutDashboard className="w-5 h-5 text-primary"/> OptiZero</span>}
+        {!isCollapsed && <span className="font-semibold flex items-center gap-2"><Leaf color="#5cdb2e" className="w-5 h-5 text-primary"/> OptiZero</span>}
         <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
           {isCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
         </Button>

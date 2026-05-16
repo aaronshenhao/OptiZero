@@ -2,6 +2,7 @@ import { Sidebar } from "./Sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Activity, BarChart3, Presentation, Download } from "lucide-react";
 import { ScenarioStudio } from "../scenario/ScenarioStudio";
+import { ParetoTradeoffTab } from "../scenario/ParetoTradeoffTab";
 
 export function DashboardLayout() {
   return (
@@ -26,8 +27,8 @@ export function DashboardLayout() {
               <TabsContent value="studio" className="h-full m-0 p-4 data-[state=active]:flex flex-col">
                 <ScenarioStudio />
               </TabsContent>
-              <TabsContent value="pareto">
-                <div className="p-8 text-center text-muted-foreground tracking-tight font-medium">Pareto Frontier Tab (Coming Next)</div>
+              <TabsContent value="pareto" className="h-full m-0 p-4 data-[state=active]:block">
+                <ParetoTradeoffTab />
               </TabsContent>
               <TabsContent value="explain">
                 <div className="p-8 text-center text-muted-foreground tracking-tight font-medium">Explainability Tab (Coming Next)</div>
