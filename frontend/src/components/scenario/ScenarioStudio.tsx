@@ -1,83 +1,212 @@
+import { AlertTriangle, ArrowRightLeft, CheckCircle2 } from "lucide-react";
 import { ScenarioSettings } from "./ScenarioSettings";
 import { KPIGrid } from "./KPIGrid";
+import { selectPlan, useScenarioStore } from "../../store/scenarioStore";
+import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-
-// We'll mock the table UI component natively for brevity or inline it here.
-function SimpleTable() {
-  return (
-    <div className="w-full overflow-auto rounded-md border mt-6">
-      <table className="w-full text-sm">
-        <thead className="border-b bg-muted/50">
-          <tr>
-            <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Facility</th>
-            <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">P1 (Units)</th>
-            <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">P2 (Units)</th>
-            <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Total Output</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="border-b transition-colors hover:bg-muted/50">
-            <td className="p-4 align-middle font-medium">Factory A (Germany)</td>
-            <td className="p-4 align-middle">4,500</td>
-            <td className="p-4 align-middle text-muted-foreground">0</td>
-            <td className="p-4 align-middle">4,500</td>
-          </tr>
-          <tr className="border-b transition-colors hover:bg-muted/50">
-            <td className="p-4 align-middle font-medium">Factory B (Poland)</td>
-            <td className="p-4 align-middle text-muted-foreground">0</td>
-            <td className="p-4 align-middle">8,200</td>
-            <td className="p-4 align-middle">8,200</td>
-          </tr>
-        </tbody>
-      </table>
-      <div className="p-4 text-center text-xs text-muted-foreground bg-muted/20">
-         *The Plan Matrix visualizer is displaying mock structure. It will populate via the FastAPI `/solve` backend response later.
-      </div>
-    </div>
-  )
-}
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import { cn } from "../../lib/utils";
+import { kgToTons, type PlanMode } from "../../services/optimizerApi";
 
 export function ScenarioStudio() {
+  const { scenarios, activeScenarioId, setSelectedPlanMode } = useScenarioStore();
+  const activeScenario = scenarios.find((scenario) => scenario.id === activeScenarioId);
+  const selectedPlan = activeScenario ? selectPlan(activeScenario) : null;
+  const compliancePlan = activeScenario?.solveResult?.plans.protect_compliance;
+  const canComparePlans = activeScenario?.decisionStatus === "tradeoff_required" && !!compliancePlan;
+
+  if (!activeScenario) return null;
+
+  const handlePlanModeChange = (mode: PlanMode) => {
+    setSelectedPlanMode(activeScenario.id, mode);
+  };
+
   return (
-    <div className="h-full grid grid-cols-1 lg:grid-cols-4 gap-6">
-      {/* Left Column: Inputs */}
-      <div className="col-span-1 lg:col-span-1 h-full">
+    <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
+      <div className="col-span-1 h-full lg:col-span-1">
         <ScenarioSettings />
       </div>
 
-      {/* Right Column: Outputs */}
-      <div className="col-span-1 lg:col-span-3 flex flex-col gap-6 overflow-y-auto pr-2 pb-4">
+      <div className="col-span-1 flex flex-col gap-6 overflow-y-auto pb-4 pr-2 lg:col-span-3">
         <KPIGrid />
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <Card className="xl:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-lg">Plan Matrix (Reallocations)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <SimpleTable />
+        {activeScenario.solveError && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="flex items-start gap-3 p-4 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-semibold">Optimizer request failed</div>
+                <p className="mt-1 text-xs opacity-90">{activeScenario.solveError}</p>
+              </div>
             </CardContent>
           </Card>
-          
-          {/* Charts placeholders for "What Changed" */}
+        )}
+
+        {activeScenario.decisionStatus === "tradeoff_required" && activeScenario.solveResult?.tradeoff_summary && (
+          <TradeoffBanner
+            carbonGapTons={kgToTons(activeScenario.solveResult.tradeoff_summary.carbon_gap_kg_if_demand_protected)}
+            unmetDemandUnits={activeScenario.solveResult.tradeoff_summary.unmet_demand_units_if_compliance_protected}
+            profitDeltaUsd={activeScenario.solveResult.tradeoff_summary.profit_delta_usd_if_compliance_protected}
+          />
+        )}
+
+        {canComparePlans && (
+          <Card>
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <ArrowRightLeft className="h-4 w-4 text-primary" />
+                  Plan Mode
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Compare full-demand operations with strict carbon compliance.
+                </p>
+              </div>
+              <div className="flex rounded-md border bg-background p-1">
+                <Button
+                  size="sm"
+                  variant={activeScenario.selectedPlanMode === "protect_demand" ? "default" : "ghost"}
+                  onClick={() => handlePlanModeChange("protect_demand")}
+                >
+                  Protect Demand
+                </Button>
+                <Button
+                  size="sm"
+                  variant={activeScenario.selectedPlanMode === "protect_compliance" ? "default" : "ghost"}
+                  onClick={() => handlePlanModeChange("protect_compliance")}
+                >
+                  Protect Compliance
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <Card className="xl:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-lg">Plan Matrix (Selected Plan)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PlanMatrix selectedPlan={selectedPlan} />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Emissions by Factory</CardTitle>
             </CardHeader>
             <CardContent className="h-64 flex items-center justify-center bg-muted/10 rounded-md border border-dashed">
-              <span className="text-muted-foreground text-sm font-medium">(Recharts Bar Chart Placeholder)</span>
+              <span className="text-muted-foreground text-sm font-medium">Chart will use selected plan allocations</span>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Total Output by Factory</CardTitle>
             </CardHeader>
             <CardContent className="h-64 flex items-center justify-center bg-muted/10 rounded-md border border-dashed">
-              <span className="text-muted-foreground text-sm font-medium">(Recharts Bar Chart Placeholder)</span>
+              <span className="text-muted-foreground text-sm font-medium">Chart will use selected plan allocations</span>
             </CardContent>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type TradeoffBannerProps = {
+  carbonGapTons: number;
+  unmetDemandUnits: number;
+  profitDeltaUsd: number;
+};
+
+function TradeoffBanner({ carbonGapTons, unmetDemandUnits, profitDeltaUsd }: TradeoffBannerProps) {
+  return (
+    <Card className="border-orange-500/30 bg-orange-500/5">
+      <CardContent className="flex items-start gap-3 p-4">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
+        <div className="space-y-2">
+          <div className="font-semibold text-orange-800">Carbon compliance trade-off required</div>
+          <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-3">
+            <MetricPill label="Demand plan carbon gap" value={`${carbonGapTons.toLocaleString()} t`} />
+            <MetricPill label="Compliance plan unmet demand" value={`${unmetDemandUnits.toLocaleString()} units`} />
+            <MetricPill
+              label="Compliance profit delta"
+              value={`${profitDeltaUsd < 0 ? "-" : "+"}$${Math.abs(profitDeltaUsd / 1000000).toFixed(2)}M`}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-background/70 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function PlanMatrix({ selectedPlan }: { selectedPlan: ReturnType<typeof selectPlan> }) {
+  const allocations = selectedPlan?.production_plan ?? [];
+
+  if (!selectedPlan || selectedPlan.status !== "Optimal") {
+    return (
+      <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+        {selectedPlan?.error ?? "No feasible production plan is available for the current constraints."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <Table>
+        <TableHeader className="bg-muted/50">
+          <TableRow>
+            <TableHead>Facility</TableHead>
+            <TableHead>Product</TableHead>
+            <TableHead className="text-right">Units</TableHead>
+            <TableHead className="text-right">Profit</TableHead>
+            <TableHead className="text-right">CO2e</TableHead>
+            <TableHead className="text-right">Energy CO2e</TableHead>
+            <TableHead className="text-right">Input CO2e</TableHead>
+            <TableHead className="text-right">CO2e / Unit</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {allocations.map((allocation) => (
+            <TableRow key={`${allocation.facility_id}-${allocation.product_id}`}>
+              <TableCell className="font-medium">{allocation.facility_id}</TableCell>
+              <TableCell>{allocation.product_id}</TableCell>
+              <TableCell className="text-right">{allocation.units_assigned.toLocaleString()}</TableCell>
+              <TableCell className="text-right">${(allocation.profit_usd / 1000000).toFixed(2)}M</TableCell>
+              <TableCell className="text-right">{kgToTons(allocation.emissions_kg).toLocaleString()} t</TableCell>
+              <TableCell className="text-right">
+                {kgToTons(allocation.production_energy_emissions_kg).toLocaleString()} t
+              </TableCell>
+              <TableCell className="text-right">
+                {kgToTons(allocation.purchased_input_emissions_kg).toLocaleString()} t
+              </TableCell>
+              <TableCell className="text-right">{allocation.emissions_kg_per_unit.toFixed(1)} kg</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      <div className="flex items-center gap-2 border-t bg-muted/20 p-3 text-xs text-muted-foreground">
+        <CheckCircle2 className={cn("h-4 w-4", selectedPlan.mode === "protect_compliance" ? "text-primary" : "text-emerald-600")} />
+        Showing the selected `{selectedPlan.mode}` solver plan from the backend-shaped response.
       </div>
     </div>
   );

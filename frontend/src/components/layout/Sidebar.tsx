@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useScenarioStore } from "../../store/scenarioStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft, LayoutDashboard, Leaf } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft, Leaf } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export function Sidebar() {

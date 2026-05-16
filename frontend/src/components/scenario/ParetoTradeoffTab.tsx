@@ -20,7 +20,10 @@ type TooltipPayload = {
     carbonCap: number;
     profit: number;
     totalCO2: number;
-    status: "Optimal" | "Infeasible";
+    demandMet: number;
+    carbonOverage: number;
+    unmetDemandUnits: number;
+    decisionStatus: "optimal" | "tradeoff_required" | "infeasible";
   };
   value: number;
 };
@@ -42,6 +45,7 @@ export function ParetoTradeoffTab() {
     activeScenario?.factoryOutage,
     activeScenario?.demandSurge,
     activeScenario?.allowUnmetDemand,
+    activeScenario?.maxOvertimePct,
     generateParetoFrontier,
   ]);
 
@@ -49,12 +53,12 @@ export function ParetoTradeoffTab() {
   const formatCarbon = (value: number) => `${(value / 1000).toFixed(0)}k t`;
 
   const optimalPoints = useMemo(
-    () => activeScenario?.paretoFrontier.filter((point) => point.status === "Optimal") ?? [],
+    () => activeScenario?.paretoFrontier.filter((point) => point.decisionStatus !== "infeasible") ?? [],
     [activeScenario?.paretoFrontier]
   );
 
   const infeasiblePoints = useMemo(
-    () => activeScenario?.paretoFrontier.filter((point) => point.status === "Infeasible") ?? [],
+    () => activeScenario?.paretoFrontier.filter((point) => point.decisionStatus === "infeasible") ?? [],
     [activeScenario?.paretoFrontier]
   );
 
@@ -90,10 +94,17 @@ export function ParetoTradeoffTab() {
       return (
         <div className="rounded-md border bg-card p-3 text-card-foreground shadow-lg">
           <p className="mb-1 font-semibold">Carbon Cap: {point.carbonCap.toLocaleString()} t</p>
-          {point.status === "Optimal" ? (
+          {point.decisionStatus !== "infeasible" ? (
             <>
-              <p className="font-medium text-primary">Best Profit: ${point.profit.toLocaleString()}</p>
+              <p className="font-medium text-primary">Compliance Profit: ${point.profit.toLocaleString()}</p>
               <p className="text-xs text-muted-foreground">CO2 Used: {point.totalCO2.toLocaleString()} t</p>
+              <p className="text-xs text-muted-foreground">Demand Met: {point.demandMet.toFixed(1)}%</p>
+              {point.unmetDemandUnits > 0 && (
+                <p className="text-xs text-orange-600">Unmet Demand: {point.unmetDemandUnits.toLocaleString()} units</p>
+              )}
+              {point.carbonOverage > 0 && (
+                <p className="text-xs text-orange-600">Carbon Gap: {point.carbonOverage.toLocaleString()} t</p>
+              )}
               <p className="mt-2 text-xs text-muted-foreground">Click to load this cap into the active scenario.</p>
             </>
           ) : (
@@ -116,7 +127,7 @@ export function ParetoTradeoffTab() {
   };
 
   const hasFrontier = activeScenario.paretoFrontier.length > 0;
-  const currentMarkerProfit = activeScenario.status === "Optimal" ? activeScenario.profit : undefined;
+  const currentMarkerProfit = activeScenario.decisionStatus !== "infeasible" ? activeScenario.profit : undefined;
 
   return (
     <div className="grid h-full grid-cols-1 gap-6 xl:grid-cols-4">
@@ -129,7 +140,7 @@ export function ParetoTradeoffTab() {
           </p>
         </div>
 
-        {activeScenario.status === "Infeasible" && (
+        {activeScenario.decisionStatus === "infeasible" && (
           <Card className="border-destructive/30 bg-destructive/5">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm text-destructive">
@@ -157,8 +168,8 @@ export function ParetoTradeoffTab() {
               <InsightMetric
                 icon={CircleDollarSign}
                 label="Current profit"
-                value={activeScenario.status === "Optimal" ? formatMoney(activeScenario.profit) : "Infeasible"}
-                isWarning={activeScenario.status === "Infeasible"}
+                value={activeScenario.decisionStatus !== "infeasible" ? formatMoney(activeScenario.profit) : "Infeasible"}
+                isWarning={activeScenario.decisionStatus === "infeasible"}
               />
               <InsightMetric
                 icon={TrendingDown}
@@ -183,7 +194,7 @@ export function ParetoTradeoffTab() {
           <CardHeader>
             <CardTitle>Profit vs Carbon Emissions</CardTitle>
             <CardDescription>
-              Optimal points form the frontier. Failed points remain visible so executives can see where constraints break.
+              The frontier uses the compliance-protected plan at each cap. Failed points remain visible where constraints break.
             </CardDescription>
           </CardHeader>
           <CardContent className="h-[440px] w-full flex-1">

@@ -4,14 +4,12 @@ import { Label } from "../ui/label";
 import { Slider } from "../ui/slider";
 import { Switch } from "../ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { AlertTriangle, TrendingUp, Factory, Zap } from "lucide-react";
+import { AlertTriangle, Clock, TrendingUp, Factory, Zap } from "lucide-react";
 
 export function ScenarioSettings() {
   const { scenarios, activeScenarioId, updateScenarioInputs, runSimulation } = useScenarioStore();
   const activeScenario = scenarios.find(s => s.id === activeScenarioId);
 
-  // Auto-run simulation when active inputs change (debounced implicitly in a real app,
-  // but since our mock is instantaneous, we can just run it. For network calls, we'd debounce here)
   useEffect(() => {
     if (!activeScenario) return;
     const timer = setTimeout(() => {
@@ -23,6 +21,7 @@ export function ScenarioSettings() {
     activeScenario?.factoryOutage, 
     activeScenario?.demandSurge, 
     activeScenario?.allowUnmetDemand, 
+    activeScenario?.maxOvertimePct,
     activeScenario?.id, 
     runSimulation
   ]);
@@ -99,6 +98,22 @@ export function ScenarioSettings() {
               onValueChange={([val]) => updateScenarioInputs(activeScenario.id, { demandSurge: val })} 
             />
           </div>
+
+          <div className="space-y-3 mt-4">
+            <div className="flex justify-between">
+              <Label className="flex items-center gap-1"><Clock className="h-3 w-3"/> Max Overtime</Label>
+              <span className="text-sm font-medium text-primary">
+                +{Math.round(activeScenario.maxOvertimePct)}%
+              </span>
+            </div>
+            <Slider
+              min={0}
+              max={20}
+              step={1}
+              value={[activeScenario.maxOvertimePct]}
+              onValueChange={([val]) => updateScenarioInputs(activeScenario.id, { maxOvertimePct: val })}
+            />
+          </div>
         </div>
 
         {/* Guardrails Section */}
@@ -110,7 +125,7 @@ export function ScenarioSettings() {
           <div className="flex items-center justify-between pt-2">
             <div className="space-y-0.5">
               <Label>Allow Unmet Demand</Label>
-              <p className="text-xs text-muted-foreground">If disabled, strict demand constraints apply.</p>
+              <p className="text-xs text-muted-foreground">When a trade-off exists, prefer the compliance-protected plan.</p>
             </div>
             <Switch 
               checked={activeScenario.allowUnmetDemand} 
@@ -118,7 +133,29 @@ export function ScenarioSettings() {
             />
           </div>
           
-          {!activeScenario.allowUnmetDemand && activeScenario.status === "Infeasible" && (
+          {activeScenario.decisionStatus === "tradeoff_required" && (
+            <div className="mt-4 p-3 bg-orange-500/10 text-orange-700 border border-orange-500/20 rounded-md flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="text-sm font-medium leading-none">
+                Trade-off Required
+                <p className="text-xs font-normal mt-1 opacity-90">
+                  The cap conflicts with full demand. Review both plan modes in the results.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activeScenario.solveError && (
+            <div className="mt-4 p-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-md flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="text-sm font-medium leading-none">
+                Backend Connection Issue
+                <p className="text-xs font-normal mt-1 opacity-90">{activeScenario.solveError}</p>
+              </div>
+            </div>
+          )}
+
+          {activeScenario.decisionStatus === "infeasible" && (
             <div className="mt-4 p-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-md flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
               <div className="text-sm font-medium leading-none">

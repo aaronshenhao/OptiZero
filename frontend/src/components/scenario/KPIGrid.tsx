@@ -10,6 +10,8 @@ export function KPIGrid() {
 
   if (!activeScenario) return null;
 
+  const hasNoPlan = activeScenario.decisionStatus === "infeasible";
+
   const KPIs = [
     {
       label: "Profit",
@@ -61,15 +63,21 @@ export function KPIGrid() {
               </div>
             </div>
             <div className="flex items-end justify-between">
-              <h3 className={cn("text-2xl font-bold tracking-tight", activeScenario.status === "Infeasible" && "opacity-50 line-through")}>
-                {activeScenario.status === "Infeasible" ? "N/A" : kpi.value}
+              <h3 className={cn("text-2xl font-bold tracking-tight", hasNoPlan && "opacity-50 line-through")}>
+                {activeScenario.isSolving ? "Solving..." : hasNoPlan ? "N/A" : kpi.value}
               </h3>
             </div>
             <div className="mt-2 text-xs text-muted-foreground font-medium">
               {activeScenario.id === baseline.id ? (
                 <span>Baseline</span>
-              ) : activeScenario.status === "Infeasible" ? (
+              ) : activeScenario.solveError ? (
+                <span className="text-destructive font-semibold">Using mock fallback</span>
+              ) : hasNoPlan ? (
                 <span className="text-destructive font-semibold">Constraint Failed</span>
+              ) : activeScenario.decisionStatus === "tradeoff_required" ? (
+                <span className="text-orange-600 font-semibold">
+                  {activeScenario.selectedPlanMode === "protect_compliance" ? "Compliance plan" : "Demand plan"}
+                </span>
               ) : (
                 <span className={cn(
                   kpi.diff > 0 && kpi.label !== "Total CO₂" ? "text-emerald-500" : 
