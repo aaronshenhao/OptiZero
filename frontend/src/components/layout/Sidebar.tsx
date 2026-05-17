@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useScenarioStore } from "../../store/scenarioStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft, Leaf } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, PanelLeftClose, PanelLeft } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export function Sidebar() {
@@ -24,7 +24,18 @@ export function Sidebar() {
   return (
     <div className={cn("flex flex-col border-r bg-muted/30 transition-all duration-300", isCollapsed ? "w-16 items-center" : "w-64")}>
       <div className="flex h-14 items-center justify-between border-b px-4">
-        {!isCollapsed && <span className="font-semibold flex items-center gap-2"><Leaf color="#52ba2c" className="w-5 h-5 text-primary"/> OptiZero</span>}
+        {!isCollapsed && (
+          <span className="flex items-center gap-2.5">
+            <img
+              src="/favicon.png"
+              alt=""
+              className="h-8 w-8 rounded-md object-cover shadow-sm ring-1 ring-border/70"
+            />
+            <span className="font-['Montserrat',ui-sans-serif,system-ui,sans-serif] text-[1.05rem] font-extrabold tracking-[0.01em] text-foreground">
+              OptiZero
+            </span>
+          </span>
+        )}
         <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
           {isCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
         </Button>
