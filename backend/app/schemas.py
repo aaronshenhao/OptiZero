@@ -37,6 +37,11 @@ class SolveRequest(BaseModel):
     scenario: ScenarioPolicy
 
 
+class ExplainRequest(BaseModel):
+    dataset_id: str
+    scenario: ScenarioPolicy
+
+
 class ParetoRequest(BaseModel):
     dataset_id: str
     scenario: ParetoScenarioPolicy

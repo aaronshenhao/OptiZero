@@ -3,11 +3,12 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.optimizer_service import (
+    explain_scenario,
     generate_pareto_points,
     get_supported_demo_data,
     solve_scenario,
 )
-from app.schemas import ParetoRequest, SolveRequest
+from app.schemas import ExplainRequest, ParetoRequest, SolveRequest
 
 
 router = APIRouter(prefix="/api/optimizer", tags=["optimizer"])
@@ -21,6 +22,11 @@ async def demo_data() -> dict[str, list[dict[str, Any]]]:
 @router.post("/solve")
 async def solve(request: SolveRequest) -> dict[str, Any]:
     return solve_scenario(request.dataset_id, request.scenario)
+
+
+@router.post("/explain")
+def explain(request: ExplainRequest) -> dict[str, Any]:
+    return explain_scenario(request.dataset_id, request.scenario)
 
 
 @router.post("/pareto")

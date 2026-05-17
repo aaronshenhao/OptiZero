@@ -85,6 +85,62 @@ class OptimizerApiTest(unittest.TestCase):
         self.assertIn("compliance_fallback", tight_point)
         self.assertLess(tight_point["compliance_fallback"]["demand_met_pct"], 100)
 
+    def test_explain_returns_sensitivities_and_recommendations(self):
+        response = client.post(
+            "/api/optimizer/explain",
+            json={
+                "dataset_id": "demo",
+                "scenario": {
+                    "carbon_cap_kg": 500_000_000,
+                    "max_overtime_pct": 10,
+                    "facility_capacity_multipliers": {"factory_3": 0.7},
+                    "demand_multiplier": 1,
+                    "carbon_penalty_usd_per_kg": None,
+                    "unmet_demand_penalty_usd_per_unit": None,
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("solve_result", data)
+        self.assertEqual(len(data["capacity_sensitivities"]), 5)
+        self.assertEqual(len(data["carbon_sensitivities"]), 2)
+        self.assertIsNotNone(data["overtime_sensitivity"])
+        self.assertGreater(len(data["recommendations"]), 0)
+
+        factory_3 = next(
+            item for item in data["capacity_sensitivities"]
+            if item["facility_id"] == "factory_3"
+        )
+        self.assertAlmostEqual(factory_3["base_multiplier"], 0.7)
+        self.assertAlmostEqual(factory_3["new_multiplier"], 0.8)
+
+    def test_explain_respects_sensitivity_caps(self):
+        response = client.post(
+            "/api/optimizer/explain",
+            json={
+                "dataset_id": "demo",
+                "scenario": {
+                    "carbon_cap_kg": 50_000_000,
+                    "max_overtime_pct": 20,
+                    "facility_capacity_multipliers": {"factory_1": 1.95},
+                    "demand_multiplier": 1,
+                    "carbon_penalty_usd_per_kg": None,
+                    "unmet_demand_penalty_usd_per_unit": None,
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        factory_1 = next(
+            item for item in data["capacity_sensitivities"]
+            if item["facility_id"] == "factory_1"
+        )
+        self.assertEqual(factory_1["new_multiplier"], 2)
+        self.assertIsNone(data["overtime_sensitivity"])
+
     def test_invalid_dataset_id_returns_clear_error(self):
         response = client.post(
             "/api/optimizer/solve",

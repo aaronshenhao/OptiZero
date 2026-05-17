@@ -126,6 +126,61 @@ export type SolveResponse = {
   tradeoff_summary: TradeoffSummary | null;
 };
 
+export type CapacitySensitivity = {
+  facility_id: string;
+  base_multiplier: number;
+  new_multiplier: number;
+  decision_status: DecisionStatus;
+  decision_status_improved: boolean;
+  profit_delta_usd: number;
+  emissions_delta_kg: number;
+  demand_met_delta_pct: number;
+  unmet_demand_delta_units: number;
+};
+
+export type CarbonSensitivity = {
+  relaxation_pct: number;
+  base_carbon_cap_kg: number;
+  new_carbon_cap_kg: number;
+  decision_status: DecisionStatus;
+  decision_status_improved: boolean;
+  profit_delta_usd: number;
+  emissions_delta_kg: number;
+  demand_met_delta_pct: number;
+  unmet_demand_delta_units: number;
+};
+
+export type OvertimeSensitivity = {
+  base_overtime_pct: number;
+  new_overtime_pct: number;
+  added_overtime_pct: number;
+  decision_status: DecisionStatus;
+  decision_status_improved: boolean;
+  profit_delta_usd: number;
+  emissions_delta_kg: number;
+  demand_met_delta_pct: number;
+  unmet_demand_delta_units: number;
+};
+
+export type ExplainabilityRecommendation = {
+  label: "add_capacity" | "relax_cap" | "allow_unmet_demand" | "increase_overtime" | string;
+  target: string;
+  title: string;
+  rationale: string;
+  profit_delta_usd: number;
+  emissions_delta_kg: number;
+  demand_met_delta_pct: number;
+  decision_status_improved: boolean;
+};
+
+export type ExplainResponse = {
+  solve_result: SolveResponse;
+  capacity_sensitivities: CapacitySensitivity[];
+  carbon_sensitivities: CarbonSensitivity[];
+  overtime_sensitivity: OvertimeSensitivity | null;
+  recommendations: ExplainabilityRecommendation[];
+};
+
 export type ParetoRequest = {
   dataset_id: string;
   scenario: Omit<ScenarioPolicyRequest, "carbon_cap_kg">;
@@ -203,6 +258,10 @@ export async function fetchDemoData(): Promise<DemoDataResponse> {
 
 export async function solveScenario(request: SolveRequest): Promise<SolveResponse> {
   return requestWithMockFallback("/api/optimizer/solve", request, () => createMockSolveResponse(request.scenario));
+}
+
+export async function explainScenario(request: SolveRequest): Promise<ExplainResponse> {
+  return requestWithMockFallback("/api/optimizer/explain", request, () => createMockExplainResponse(request.scenario));
 }
 
 export async function generateParetoFrontier(request: ParetoRequest): Promise<ParetoResponse> {
@@ -348,6 +407,106 @@ function createMockSolveResponse(policy: ScenarioPolicyRequest): SolveResponse {
       unmet_demand_units_if_compliance_protected: Math.round(unmetDemandUnits),
       profit_delta_usd_if_compliance_protected: Math.round(compliancePlan.total_profit_usd! - demandPlan.total_profit_usd!),
     },
+  };
+}
+
+function createMockExplainResponse(policy: ScenarioPolicyRequest): ExplainResponse {
+  const solve = createMockSolveResponse(policy);
+  const basePlan = solve.decision_status === "tradeoff_required" && solve.plans.protect_compliance
+    ? solve.plans.protect_compliance
+    : solve.plans.protect_demand;
+  const baseProfit = basePlan.total_profit_usd ?? 0;
+  const baseEmissions = basePlan.total_emissions_kg ?? 0;
+  const outageMultiplier = policy.facility_capacity_multipliers.factory_3 ?? 1;
+  const capSeverity = Math.max(0, ((basePlan.carbon_overage_kg ?? 0) / Math.max(baseEmissions, 1)));
+
+  const capacity_sensitivities: CapacitySensitivity[] = ["factory_1", "factory_2", "factory_3", "factory_4", "factory_5"].map((facilityId, index) => {
+    const currentMultiplier = policy.facility_capacity_multipliers[facilityId] ?? 1;
+    const facilityLift = facilityId === "factory_3" && outageMultiplier < 1 ? 1.6 : 1;
+    const profitDelta = Math.round((220000 + index * 85000) * facilityLift * (1 + capSeverity));
+    const demandDelta = Number((facilityLift * (solve.decision_status === "infeasible" ? 4.5 : 0.4 + index * 0.2)).toFixed(2));
+
+    return {
+      facility_id: facilityId,
+      base_multiplier: currentMultiplier,
+      new_multiplier: Math.min(2, Number((currentMultiplier + 0.1).toFixed(2))),
+      decision_status: solve.decision_status === "infeasible" && index >= 2 ? "tradeoff_required" : solve.decision_status,
+      decision_status_improved: solve.decision_status === "infeasible" && index >= 2,
+      profit_delta_usd: profitDelta,
+      emissions_delta_kg: Math.round((profitDelta / Math.max(baseProfit, 1)) * baseEmissions * 0.04),
+      demand_met_delta_pct: demandDelta,
+      unmet_demand_delta_units: Math.round(-250 * demandDelta),
+    };
+  });
+
+  const carbon_sensitivities: CarbonSensitivity[] = [5, 10].map((pct) => ({
+    relaxation_pct: pct,
+    base_carbon_cap_kg: policy.carbon_cap_kg ?? 0,
+    new_carbon_cap_kg: Math.round((policy.carbon_cap_kg ?? 0) * (1 + pct / 100)),
+    decision_status: solve.decision_status === "tradeoff_required" && pct >= 10 ? "optimal" : solve.decision_status,
+    decision_status_improved: solve.decision_status === "tradeoff_required" && pct >= 10,
+    profit_delta_usd: Math.round(baseProfit * (0.012 * pct)),
+    emissions_delta_kg: Math.round(baseEmissions * (0.006 * pct)),
+    demand_met_delta_pct: Number((pct * 0.55).toFixed(2)),
+    unmet_demand_delta_units: Math.round(-180 * pct),
+  }));
+
+  const overtime_sensitivity: OvertimeSensitivity | null = policy.max_overtime_pct >= 20 ? null : {
+    base_overtime_pct: policy.max_overtime_pct,
+    new_overtime_pct: Math.min(20, policy.max_overtime_pct + 5),
+    added_overtime_pct: Math.min(20, policy.max_overtime_pct + 5) - policy.max_overtime_pct,
+    decision_status: solve.decision_status,
+    decision_status_improved: false,
+    profit_delta_usd: Math.round(baseProfit * 0.035),
+    emissions_delta_kg: Math.round(baseEmissions * 0.012),
+    demand_met_delta_pct: solve.decision_status === "infeasible" ? 3.2 : 0.8,
+    unmet_demand_delta_units: solve.decision_status === "infeasible" ? -1400 : -220,
+  };
+
+  const recommendationCandidates: ExplainabilityRecommendation[] = [
+    ...capacity_sensitivities.map((item) => ({
+      label: "add_capacity",
+      target: item.facility_id,
+      title: `Add capacity at ${item.facility_id}`,
+      rationale: "A repeated solve tests whether this facility relieves the current bottleneck.",
+      profit_delta_usd: item.profit_delta_usd,
+      emissions_delta_kg: item.emissions_delta_kg,
+      demand_met_delta_pct: item.demand_met_delta_pct,
+      decision_status_improved: item.decision_status_improved,
+    })),
+    ...carbon_sensitivities.map((item) => ({
+      label: "relax_cap",
+      target: `+${item.relaxation_pct}%`,
+      title: `Model a ${item.relaxation_pct}% carbon-cap relaxation`,
+      rationale: "Quantifies the value of offsets, allowances, or a phased target.",
+      profit_delta_usd: item.profit_delta_usd,
+      emissions_delta_kg: item.emissions_delta_kg,
+      demand_met_delta_pct: item.demand_met_delta_pct,
+      decision_status_improved: item.decision_status_improved,
+    })),
+  ];
+
+  if (overtime_sensitivity) {
+    recommendationCandidates.push({
+      label: "increase_overtime",
+      target: `+${overtime_sensitivity.added_overtime_pct}%`,
+      title: `Raise overtime allowance to ${overtime_sensitivity.new_overtime_pct}%`,
+      rationale: "Tests a short-run operating lever before adding fixed capacity.",
+      profit_delta_usd: overtime_sensitivity.profit_delta_usd,
+      emissions_delta_kg: overtime_sensitivity.emissions_delta_kg,
+      demand_met_delta_pct: overtime_sensitivity.demand_met_delta_pct,
+      decision_status_improved: overtime_sensitivity.decision_status_improved,
+    });
+  }
+
+  return {
+    solve_result: solve,
+    capacity_sensitivities,
+    carbon_sensitivities,
+    overtime_sensitivity,
+    recommendations: recommendationCandidates
+      .sort((a, b) => Number(b.decision_status_improved) - Number(a.decision_status_improved) || b.profit_delta_usd - a.profit_delta_usd)
+      .slice(0, 5),
   };
 }
 

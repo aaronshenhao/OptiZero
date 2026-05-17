@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import {
   buildScenarioPolicy,
+  explainScenario,
   generateParetoFrontier,
   getSelectedPlan,
   kgToTons,
   solveScenario,
   tonsToKg,
   type DecisionStatus,
+  type ExplainResponse,
   type OptimizationPlan,
   type PlanMode,
   type ProductionAllocation,
@@ -48,6 +50,10 @@ export type Scenario = {
   isSolving: boolean;
   solveError?: string;
   lastSolvedAt?: number;
+  explainResult?: ExplainResponse;
+  isExplainLoading: boolean;
+  explainError?: string;
+  explainUpdatedAt?: number;
 
   profit: number;
   totalCO2: number;
@@ -78,6 +84,7 @@ const createDefaultScenario = (id: string, name: string): Scenario => ({
   decisionStatus: "optimal",
   selectedPlanMode: "protect_demand",
   isSolving: false,
+  isExplainLoading: false,
   profit: 15400000,
   totalCO2: 450000,
   capUtilization: 90,
@@ -99,6 +106,7 @@ export type ScenarioState = {
   setSelectedPlanMode: (id: string, mode: PlanMode) => void;
   updateScenarioInputs: (id: string, inputs: Partial<Scenario>) => void;
   runSimulation: (id: string) => Promise<void>;
+  generateExplainability: (id: string) => Promise<void>;
   generateParetoFrontier: (id: string) => Promise<void>;
 };
 
@@ -222,6 +230,52 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
                 ...item,
                 isSolving: false,
                 solveError: message,
+              }
+            : item
+        )),
+      }));
+    }
+  },
+
+  generateExplainability: async (id: string) => {
+    const scenario = get().scenarios.find((item) => item.id === id);
+    if (!scenario) return;
+
+    set((state) => ({
+      scenarios: state.scenarios.map((item) => (
+        item.id === id ? { ...item, isExplainLoading: true, explainError: undefined } : item
+      )),
+    }));
+
+    try {
+      const response = await explainScenario({
+        dataset_id: "demo",
+        scenario: buildScenarioPolicy(scenario),
+      });
+
+      set((state) => ({
+        scenarios: state.scenarios.map((item) => (
+          item.id === id
+            ? {
+                ...item,
+                explainResult: response,
+                isExplainLoading: false,
+                explainError: undefined,
+                explainUpdatedAt: Date.now(),
+              }
+            : item
+        )),
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to generate explainability analysis.";
+
+      set((state) => ({
+        scenarios: state.scenarios.map((item) => (
+          item.id === id
+            ? {
+                ...item,
+                isExplainLoading: false,
+                explainError: message,
               }
             : item
         )),

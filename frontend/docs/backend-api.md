@@ -120,6 +120,81 @@ Future preferred contract: return explicit `protect_demand` and `protect_complia
 }
 ```
 
+## `POST /api/optimizer/explain`
+
+Runs one scenario plus repeated-solve sensitivities for the Explainability tab.
+The normal `/solve` contract is returned under `solve_result`; sensitivities are
+used for executive recommendations and do not change the selected production plan.
+
+```json
+{
+  "dataset_id": "demo",
+  "scenario": {
+    "carbon_cap_kg": 500000000,
+    "max_overtime_pct": 10,
+    "facility_capacity_multipliers": { "factory_3": 0.7 },
+    "demand_multiplier": 1.15,
+    "carbon_penalty_usd_per_kg": null,
+    "unmet_demand_penalty_usd_per_unit": null
+  }
+}
+```
+
+```json
+{
+  "solve_result": { "decision_status": "tradeoff_required", "plans": {} },
+  "capacity_sensitivities": [
+    {
+      "facility_id": "factory_3",
+      "base_multiplier": 0.7,
+      "new_multiplier": 0.8,
+      "decision_status": "tradeoff_required",
+      "decision_status_improved": false,
+      "profit_delta_usd": 420000,
+      "emissions_delta_kg": 120000,
+      "demand_met_delta_pct": 0.4,
+      "unmet_demand_delta_units": -200
+    }
+  ],
+  "carbon_sensitivities": [
+    {
+      "relaxation_pct": 5,
+      "base_carbon_cap_kg": 500000000,
+      "new_carbon_cap_kg": 525000000,
+      "decision_status": "optimal",
+      "decision_status_improved": true,
+      "profit_delta_usd": 900000,
+      "emissions_delta_kg": 25000000,
+      "demand_met_delta_pct": 2.1,
+      "unmet_demand_delta_units": -1200
+    }
+  ],
+  "overtime_sensitivity": {
+    "base_overtime_pct": 10,
+    "new_overtime_pct": 15,
+    "added_overtime_pct": 5,
+    "decision_status": "tradeoff_required",
+    "decision_status_improved": false,
+    "profit_delta_usd": 350000,
+    "emissions_delta_kg": 90000,
+    "demand_met_delta_pct": 0.5,
+    "unmet_demand_delta_units": -250
+  },
+  "recommendations": [
+    {
+      "label": "add_capacity",
+      "target": "factory_3",
+      "title": "Add capacity at factory_3",
+      "rationale": "Repeated solve shows the profit and feasibility effect of a 10 percentage-point capacity lift.",
+      "profit_delta_usd": 420000,
+      "emissions_delta_kg": 120000,
+      "demand_met_delta_pct": 0.4,
+      "decision_status_improved": false
+    }
+  ]
+}
+```
+
 ```json
 {
   "points": [

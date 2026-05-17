@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Activity, BarChart3, Presentation, Download } from "lucide-react";
 import { ScenarioStudio } from "../scenario/ScenarioStudio";
 import { ParetoTradeoffTab } from "../scenario/ParetoTradeoffTab";
+import { ExplainabilityTab } from "../scenario/ExplainabilityTab";
 
 export function DashboardLayout() {
   return (
@@ -31,7 +32,7 @@ export function DashboardLayout() {
                 <ParetoTradeoffTab />
               </TabsContent>
               <TabsContent value="explain">
-                <div className="p-8 text-center text-muted-foreground tracking-tight font-medium">Explainability Tab (Coming Next)</div>
+                <ExplainabilityTab />
               </TabsContent>
               <TabsContent value="export">
                 <div className="p-8 text-center text-muted-foreground tracking-tight font-medium">Executive Pack Tab (Coming Next)</div>
