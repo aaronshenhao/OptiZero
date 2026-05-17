@@ -119,6 +119,7 @@ export function ExplainabilityTab() {
 
   const explainResult = activeScenario.explainResult;
   const tradeoffSummary = activeScenario.solveResult?.tradeoff_summary;
+  const demandPlan = activeScenario.solveResult?.plans.protect_demand;
   const compliancePlan = activeScenario.solveResult?.plans.protect_compliance;
   const hasPlan = selectedPlan?.status === "Optimal";
   const hasSelectedPlanRisk = hasRisk(selectedPlan, activeScenario.decisionStatus);
@@ -192,7 +193,15 @@ export function ExplainabilityTab() {
           demoData={demoData}
         />
 
-        {hasSelectedPlanRisk && <RiskPanel selectedPlan={selectedPlan} scenarioStatus={activeScenario.decisionStatus} demoData={demoData} />}
+        {hasSelectedPlanRisk && (
+          <RiskPanel
+            selectedPlan={selectedPlan}
+            demandPlan={demandPlan}
+            scenarioStatus={activeScenario.decisionStatus}
+            tradeoffSummary={tradeoffSummary}
+            demoData={demoData}
+          />
+        )}
 
         <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
           <OperatingBottlenecks rows={facilityUtilization} hasPlan={hasPlan} capacitySensitivities={explainResult?.capacity_sensitivities ?? []} />
@@ -536,7 +545,19 @@ function TradeoffExplanation({
   );
 }
 
-function RiskPanel({ selectedPlan, scenarioStatus, demoData }: { selectedPlan: OptimizationPlan | null; scenarioStatus: string; demoData: DemoDataResponse | null }) {
+function RiskPanel({
+  selectedPlan,
+  demandPlan,
+  scenarioStatus,
+  tradeoffSummary,
+  demoData,
+}: {
+  selectedPlan: OptimizationPlan | null;
+  demandPlan?: OptimizationPlan | null;
+  scenarioStatus: string;
+  tradeoffSummary?: { profit_delta_usd_if_compliance_protected: number } | null;
+  demoData: DemoDataResponse | null;
+}) {
   const fallbackRelaxed = ((selectedPlan?.relaxed_constraints ?? []) as Array<{ constraint_name: string; type: string }>).filter((item) => item.type !== "carbon_cap" && item.type !== "demand");
   const shortfalls = selectedPlan?.demand_shortfalls ?? [];
   const carbonOverage = selectedPlan?.carbon_overage_kg ?? 0;
@@ -552,9 +573,26 @@ function RiskPanel({ selectedPlan, scenarioStatus, demoData }: { selectedPlan: O
       <CardContent className="space-y-3">
         {scenarioStatus === "infeasible" && <RiskRow title="Infeasible scenario" detail={selectedPlan?.error ?? "The hard constraints cannot produce a valid plan."} />}
         {carbonOverage > 0 && <RiskRow title="Carbon compliance gap" detail={`${kgToTons(carbonOverage).toLocaleString()} t above the active cap if demand is protected.`} />}
-        {shortfalls.map((item) => (
-          <RiskRow key={item.product_id} title={`Demand shortfall: ${getProductName(item.product_id, demoData)}`} detail={`${item.unmet_units.toLocaleString()} units unmet under compliance protection.`} />
-        ))}
+        {tradeoffSummary && (
+          <RiskRow
+            title="Total compliance profit impact"
+            detail={`${formatMoney(tradeoffSummary.profit_delta_usd_if_compliance_protected)} vs protecting demand. This total is the authoritative optimizer comparison.`}
+          />
+        )}
+        {shortfalls.map((item) => {
+          const profitLost = estimateShortfallProfitLoss(item.product_id, item.unmet_units, demandPlan, selectedPlan);
+          return (
+            <RiskRow
+              key={item.product_id}
+              title={`Demand shortfall: ${getProductName(item.product_id, demoData)}`}
+              detail={
+                profitLost === null
+                  ? `${item.unmet_units.toLocaleString()} units unmet under compliance protection.`
+                  : `${item.unmet_units.toLocaleString()} units unmet under compliance protection; estimated ${formatMoneyAbsolute(profitLost)} profit not captured.`
+              }
+            />
+          );
+        })}
         {fallbackRelaxed.map((item) => (
           <RiskRow key={item.constraint_name} title={readableFallbackRelaxedConstraint(item)} detail="The solver had to relax this business guardrail to produce the selected plan." />
         ))}
@@ -642,17 +680,21 @@ function StatusPill({ improved }: { improved: boolean }) {
 }
 
 function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDataResponse | null): WatchlistItem[] {
-  const demandHasIssue =
-    (selectedPlan?.demand_met_pct ?? 100) < 99.99 ||
-    (selectedPlan?.demand_shortfalls?.length ?? 0) > 0 ||
-    (selectedPlan?.relaxed_constraints ?? []).some((item) => item.type === "demand");
-  const demandShortfallProductIds = new Set((selectedPlan?.demand_shortfalls ?? []).map((item) => item.product_id));
+  const demandIssueProductIds = new Set<string>();
+  (selectedPlan?.demand_shortfalls ?? []).forEach((item) => {
+    demandIssueProductIds.add(item.product_id);
+  });
+  (selectedPlan?.relaxed_constraints ?? []).forEach((item) => {
+    if (item.type === "demand") {
+      demandIssueProductIds.add(item.product_id);
+    }
+  });
 
   return (selectedPlan?.binding_constraints ?? [])
     .map((constraint) => {
       const group = constraintGroup(constraint.constraint_name);
       const productId = constraintProductId(constraint.constraint_name);
-      const hasDemandIssue = group === "Demand" && (demandHasIssue || (productId ? demandShortfallProductIds.has(productId) : false));
+      const hasDemandIssue = group === "Demand" && !!productId && demandIssueProductIds.has(productId);
       return {
         name: constraint.constraint_name,
         label: readableConstraintName(constraint.constraint_name, demoData),
@@ -663,7 +705,7 @@ function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDat
         meaning: constraintMeaning(constraint.constraint_name, group, hasDemandIssue),
       };
     })
-    .filter((item) => item.group !== "Demand" || demandHasIssue)
+    .filter((item) => item.group !== "Demand" || item.hasDemandIssue)
     .filter((item) => hasConstraintSignal(item.slack, item.marginalValue))
     .sort(compareWatchlistItems);
 }
@@ -834,7 +876,7 @@ function constraintProductId(name: string) {
 function constraintMeaning(name: string, group: string, hasDemandIssue = false) {
   if (group === "Carbon") return name.startsWith("Soft") ? "Demand protection is creating a carbon compliance gap; use the trade-off panel for business impact." : "The carbon ceiling is limiting the selected plan; use sensitivity results to size the opportunity.";
   if (group === "Capacity") return "This facility is using its available labor-hour envelope; use +10% capacity impact to size the opportunity.";
-  if (group === "Demand") return hasDemandIssue ? "Demand was relaxed to maintain compliance; use unmet units and profit delta for business impact." : "Demand target is satisfied in the selected plan.";
+  if (group === "Demand") return hasDemandIssue ? "This product has unmet demand under the selected compliance plan." : "Demand target is satisfied in the selected plan.";
   return "The solver marked this constraint as economically relevant.";
 }
 
@@ -849,7 +891,7 @@ function formatConstraintSlack(item: WatchlistItem) {
 }
 
 function formatImpactSignal(item: WatchlistItem) {
-  if (item.group === "Demand") return item.hasDemandIssue ? "High penalty" : "Demand target";
+  if (item.group === "Demand") return item.hasDemandIssue ? "Unmet demand" : "Demand target";
   if (isPenaltyDrivenConstraint(item)) return "High penalty";
 
   const absoluteValue = Math.abs(item.marginalValue);
@@ -869,6 +911,28 @@ function isImplausiblyHighMarginalValue(item: WatchlistItem) {
   if (item.group === "Carbon") return absoluteValue >= 10000;
   if (item.group === "Capacity") return absoluteValue >= 100000;
   return false;
+}
+
+function estimateShortfallProfitLoss(
+  productId: string,
+  unmetUnits: number,
+  demandPlan?: OptimizationPlan | null,
+  fallbackPlan?: OptimizationPlan | null
+) {
+  const averageProfitPerUnit =
+    averageProfitPerUnitForProduct(demandPlan, productId) ??
+    averageProfitPerUnitForProduct(fallbackPlan, productId);
+
+  return averageProfitPerUnit === null ? null : unmetUnits * averageProfitPerUnit;
+}
+
+function averageProfitPerUnitForProduct(plan: OptimizationPlan | null | undefined, productId: string) {
+  const productAllocations = (plan?.production_plan ?? []).filter((allocation) => allocation.product_id === productId);
+  const units = productAllocations.reduce((sum, allocation) => sum + allocation.units_assigned, 0);
+  if (units <= 0) return null;
+
+  const profit = productAllocations.reduce((sum, allocation) => sum + allocation.profit_usd, 0);
+  return profit / units;
 }
 
 function getFacilityName(facilityId: string, demoData: DemoDataResponse | null) {
@@ -894,6 +958,10 @@ function readableMode(mode: string) {
 function formatMoney(value: number) {
   const sign = value < 0 ? "-" : "";
   return `${sign}$${Math.abs(value / 1000000).toFixed(2)}M`;
+}
+
+function formatMoneyAbsolute(value: number) {
+  return `$${Math.abs(value / 1000000).toFixed(2)}M`;
 }
 
 function formatMoneyChange(value: number) {
