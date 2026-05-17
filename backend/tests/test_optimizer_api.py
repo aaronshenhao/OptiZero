@@ -1,14 +1,32 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, get_cors_origins
 
 
 client = TestClient(app)
 
 
 class OptimizerApiTest(unittest.TestCase):
+    def test_cors_origins_include_configured_frontend_urls(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "FRONTEND_URLS": (
+                    "https://optizero-frontend.up.railway.app/, "
+                    "https://optizero.vercel.app"
+                )
+            },
+        ):
+            origins = get_cors_origins()
+
+        self.assertIn("http://localhost:5173", origins)
+        self.assertIn("https://optizero-frontend.up.railway.app", origins)
+        self.assertIn("https://optizero.vercel.app", origins)
+        self.assertNotIn("https://optizero-frontend.up.railway.app/", origins)
+
     def test_demo_data_returns_full_demo_dataset(self):
         response = client.get("/api/optimizer/demo-data")
 
