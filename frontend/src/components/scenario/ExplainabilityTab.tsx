@@ -60,6 +60,16 @@ type RouteRationale = ProductionAllocation & {
   hoursUsed: number;
 };
 
+type WatchlistItem = {
+  name: string;
+  label: string;
+  group: string;
+  slack: number;
+  marginalValue: number;
+  hasDemandIssue: boolean;
+  meaning: string;
+};
+
 export function ExplainabilityTab() {
   const { scenarios, activeScenarioId, generateExplainability } = useScenarioStore();
   const activeScenario = scenarios.find((scenario) => scenario.id === activeScenarioId);
@@ -311,7 +321,7 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
                     <TableHead>Constraint</TableHead>
                     <TableHead>Group</TableHead>
                     <TableHead className="text-right">Headroom</TableHead>
-                    <TableHead className="text-right">Marginal Value</TableHead>
+                    <TableHead className="text-right">Impact Signal</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -327,7 +337,7 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
                         </span>
                       </TableCell>
                       <TableCell className="text-right">{formatConstraintSlack(item)}</TableCell>
-                      <TableCell className="text-right">{formatMarginalValue(item)}</TableCell>
+                      <TableCell className="text-right">{formatImpactSignal(item)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -631,27 +641,48 @@ function StatusPill({ improved }: { improved: boolean }) {
   );
 }
 
-function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDataResponse | null) {
+function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDataResponse | null): WatchlistItem[] {
   const demandHasIssue =
     (selectedPlan?.demand_met_pct ?? 100) < 99.99 ||
     (selectedPlan?.demand_shortfalls?.length ?? 0) > 0 ||
     (selectedPlan?.relaxed_constraints ?? []).some((item) => item.type === "demand");
+  const demandShortfallProductIds = new Set((selectedPlan?.demand_shortfalls ?? []).map((item) => item.product_id));
 
   return (selectedPlan?.binding_constraints ?? [])
     .map((constraint) => {
       const group = constraintGroup(constraint.constraint_name);
+      const productId = constraintProductId(constraint.constraint_name);
+      const hasDemandIssue = group === "Demand" && (demandHasIssue || (productId ? demandShortfallProductIds.has(productId) : false));
       return {
         name: constraint.constraint_name,
         label: readableConstraintName(constraint.constraint_name, demoData),
         group,
         slack: constraint.slack,
         marginalValue: constraint.marginal_value,
-        meaning: constraintMeaning(constraint.constraint_name, group),
+        hasDemandIssue,
+        meaning: constraintMeaning(constraint.constraint_name, group, hasDemandIssue),
       };
     })
     .filter((item) => item.group !== "Demand" || demandHasIssue)
     .filter((item) => hasConstraintSignal(item.slack, item.marginalValue))
-    .sort((a, b) => Math.abs(b.marginalValue) - Math.abs(a.marginalValue));
+    .sort(compareWatchlistItems);
+}
+
+function compareWatchlistItems(a: WatchlistItem, b: WatchlistItem) {
+  const aPriority = watchlistSortPriority(a);
+  const bPriority = watchlistSortPriority(b);
+  if (aPriority !== bPriority) return aPriority - bPriority;
+  return Math.abs(watchlistSortableMarginalValue(b)) - Math.abs(watchlistSortableMarginalValue(a));
+}
+
+function watchlistSortPriority(item: WatchlistItem) {
+  if (item.group === "Demand" && item.hasDemandIssue) return 1;
+  if (item.group === "Demand") return 2;
+  return 0;
+}
+
+function watchlistSortableMarginalValue(item: WatchlistItem) {
+  return isPenaltyDrivenConstraint(item) ? 0 : item.marginalValue;
 }
 
 function hasConstraintSignal(slack: number, marginalValue: number) {
@@ -780,11 +811,7 @@ function readableConstraintName(name: string, demoData: DemoDataResponse | null)
   const capacityFacilityId = name.startsWith("Capacity_") ? name.replace("Capacity_", "") : null;
   if (capacityFacilityId) return `Capacity: ${getFacilityName(capacityFacilityId, demoData)}`;
 
-  const demandProductId = name.startsWith("Soft_Demand_")
-    ? name.replace("Soft_Demand_", "")
-    : name.startsWith("Demand_")
-      ? name.replace("Demand_", "")
-      : null;
+  const demandProductId = constraintProductId(name);
   if (demandProductId) return `Demand: ${getProductName(demandProductId, demoData)}`;
 
   return name
@@ -796,10 +823,18 @@ function readableConstraintName(name: string, demoData: DemoDataResponse | null)
     .replaceAll("_", " ");
 }
 
-function constraintMeaning(name: string, group: string) {
-  if (group === "Carbon") return name.startsWith("Soft") ? "Demand protection is creating a measurable carbon gap." : "The carbon ceiling is limiting the profit-maximizing plan.";
-  if (group === "Capacity") return "This facility is using its available labor-hour envelope.";
-  if (group === "Demand") return "The model is preserving or relaxing product demand commitments.";
+function constraintProductId(name: string) {
+  return name.startsWith("Soft_Demand_")
+    ? name.replace("Soft_Demand_", "")
+    : name.startsWith("Demand_")
+      ? name.replace("Demand_", "")
+      : null;
+}
+
+function constraintMeaning(name: string, group: string, hasDemandIssue = false) {
+  if (group === "Carbon") return name.startsWith("Soft") ? "Demand protection is creating a carbon compliance gap; use the trade-off panel for business impact." : "The carbon ceiling is limiting the selected plan; use sensitivity results to size the opportunity.";
+  if (group === "Capacity") return "This facility is using its available labor-hour envelope; use +10% capacity impact to size the opportunity.";
+  if (group === "Demand") return hasDemandIssue ? "Demand was relaxed to maintain compliance; use unmet units and profit delta for business impact." : "Demand target is satisfied in the selected plan.";
   return "The solver marked this constraint as economically relevant.";
 }
 
@@ -807,16 +842,33 @@ function readableFallbackRelaxedConstraint(item: { constraint_name: string }) {
   return item.constraint_name.replaceAll("_", " ");
 }
 
-function formatConstraintSlack(item: ReturnType<typeof buildWatchlist>[number]) {
+function formatConstraintSlack(item: WatchlistItem) {
   if (item.group === "Carbon") return `${kgToTons(Math.abs(item.slack)).toLocaleString()} t`;
   if (item.group === "Capacity") return `${Math.abs(item.slack).toLocaleString()} hrs`;
   return Math.abs(item.slack).toLocaleString();
 }
 
-function formatMarginalValue(item: ReturnType<typeof buildWatchlist>[number]) {
-  const unit = item.group === "Carbon" ? "/kg" : item.group === "Capacity" ? "/hr" : item.group === "Demand" ? "/unit" : "";
+function formatImpactSignal(item: WatchlistItem) {
+  if (item.group === "Demand") return item.hasDemandIssue ? "High penalty" : "Demand target";
+  if (isPenaltyDrivenConstraint(item)) return "High penalty";
+
+  const absoluteValue = Math.abs(item.marginalValue);
+  if (isImplausiblyHighMarginalValue(item)) return "High impact";
+
+  const unit = item.group === "Carbon" ? "/kg" : item.group === "Capacity" ? "/hr" : "";
   const sign = item.marginalValue < 0 ? "-" : "";
-  return `${sign}$${Math.abs(item.marginalValue).toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}`;
+  return `${sign}$${absoluteValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}`;
+}
+
+function isPenaltyDrivenConstraint(item: WatchlistItem) {
+  return item.group === "Demand" || item.name.startsWith("Soft_");
+}
+
+function isImplausiblyHighMarginalValue(item: WatchlistItem) {
+  const absoluteValue = Math.abs(item.marginalValue);
+  if (item.group === "Carbon") return absoluteValue >= 10000;
+  if (item.group === "Capacity") return absoluteValue >= 100000;
+  return false;
 }
 
 function getFacilityName(facilityId: string, demoData: DemoDataResponse | null) {
