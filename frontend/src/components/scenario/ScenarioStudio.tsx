@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { ScenarioSettings } from "./ScenarioSettings";
 import { KPIGrid } from "./KPIGrid";
 import { selectPlan, useScenarioStore } from "../../store/scenarioStore";
-import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import {
   Table,
@@ -14,14 +13,12 @@ import {
   TableRow,
 } from "../ui/table";
 import { cn } from "../../lib/utils";
-import { fetchDemoData, kgToTons, type DemoDataResponse, type PlanMode } from "../../services/optimizerApi";
+import { fetchDemoData, kgToTons, type DemoDataResponse } from "../../services/optimizerApi";
 
 export function ScenarioStudio() {
-  const { scenarios, activeScenarioId, setSelectedPlanMode } = useScenarioStore();
+  const { scenarios, activeScenarioId } = useScenarioStore();
   const activeScenario = scenarios.find((scenario) => scenario.id === activeScenarioId);
   const selectedPlan = activeScenario ? selectPlan(activeScenario) : null;
-  const compliancePlan = activeScenario?.solveResult?.plans.protect_compliance;
-  const canComparePlans = activeScenario?.decisionStatus === "tradeoff_required" && !!compliancePlan;
   const [demoData, setDemoData] = useState<DemoDataResponse | null>(null);
 
   useEffect(() => {
@@ -30,17 +27,13 @@ export function ScenarioStudio() {
 
   if (!activeScenario) return null;
 
-  const handlePlanModeChange = (mode: PlanMode) => {
-    setSelectedPlanMode(activeScenario.id, mode);
-  };
-
   return (
-    <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-4">
-      <div className="col-span-1 h-full lg:col-span-1">
+    <div className="grid h-full min-h-0 w-full grid-cols-1 gap-6 lg:grid-cols-4">
+      <div className="col-span-1 min-h-0 lg:col-span-1">
         <ScenarioSettings />
       </div>
 
-      <div className="col-span-1 flex flex-col gap-6 overflow-y-auto pb-4 pr-2 lg:col-span-3">
+      <div className="col-span-1 flex min-h-0 flex-col gap-6 overflow-y-auto pb-4 pr-2 lg:col-span-3">
         <KPIGrid />
 
         {activeScenario.solveError && (
@@ -63,63 +56,13 @@ export function ScenarioStudio() {
           />
         )}
 
-        {canComparePlans && (
+        <div className="grid grid-cols-1 gap-6">
           <Card>
-            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ArrowRightLeft className="h-4 w-4 text-primary" />
-                  Plan Mode
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Compare full-demand operations with strict carbon compliance.
-                </p>
-              </div>
-              <div className="flex rounded-md border bg-background p-1">
-                <Button
-                  size="sm"
-                  variant={activeScenario.selectedPlanMode === "protect_demand" ? "default" : "ghost"}
-                  onClick={() => handlePlanModeChange("protect_demand")}
-                >
-                  Protect Demand
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeScenario.selectedPlanMode === "protect_compliance" ? "default" : "ghost"}
-                  onClick={() => handlePlanModeChange("protect_compliance")}
-                >
-                  Protect Compliance
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          <Card className="xl:col-span-2">
             <CardHeader>
               <CardTitle className="text-lg">Plan Matrix (Selected Plan)</CardTitle>
             </CardHeader>
             <CardContent>
               <PlanMatrix selectedPlan={selectedPlan} demoData={demoData} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Emissions by Factory</CardTitle>
-            </CardHeader>
-            <CardContent className="h-64 flex items-center justify-center bg-muted/10 rounded-md border border-dashed">
-              <span className="text-muted-foreground text-sm font-medium">Chart will use selected plan allocations</span>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Total Output by Factory</CardTitle>
-            </CardHeader>
-            <CardContent className="h-64 flex items-center justify-center bg-muted/10 rounded-md border border-dashed">
-              <span className="text-muted-foreground text-sm font-medium">Chart will use selected plan allocations</span>
             </CardContent>
           </Card>
         </div>

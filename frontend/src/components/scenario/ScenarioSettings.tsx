@@ -3,7 +3,7 @@ import { useScenarioStore } from "../../store/scenarioStore";
 import { Label } from "../ui/label";
 import { Slider } from "../ui/slider";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { AlertTriangle, Clock, TrendingUp, Factory, Zap } from "lucide-react";
+import { Clock, TrendingUp, Factory, Zap } from "lucide-react";
 
 export function ScenarioSettings() {
   const { scenarios, activeScenarioId, updateScenarioInputs, runSimulation } = useScenarioStore();
@@ -27,13 +27,13 @@ export function ScenarioSettings() {
   if (!activeScenario) return null;
 
   return (
-    <Card className="h-full overflow-y-auto">
-      <CardHeader>
+    <Card className="h-full min-h-0 overflow-y-auto">
+      <CardHeader className="pb-4">
         <CardTitle className="text-xl flex items-center gap-2">
           <Zap className="h-5 w-5 text-yellow-500"/> Controllers
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-8">
+      <CardContent className="space-y-7 pb-5">
         
         {/* Carbon Policy Section */}
         <div className="space-y-4">
@@ -112,45 +112,6 @@ export function ScenarioSettings() {
               onValueChange={([val]) => updateScenarioInputs(activeScenario.id, { maxOvertimePct: val })}
             />
           </div>
-        </div>
-
-        {/* Scenario Status Section */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 border-b pb-2 mt-4">
-            <h4 className="font-semibold text-sm uppercase text-muted-foreground tracking-wider">Scenario Status</h4>
-          </div>
-          
-          {activeScenario.decisionStatus === "tradeoff_required" && (
-            <div className="mt-4 p-3 bg-orange-500/10 text-orange-700 border border-orange-500/20 rounded-md flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              <div className="text-sm font-medium leading-none">
-                Trade-off Required
-                <p className="text-xs font-normal mt-1 opacity-90">
-                  The cap conflicts with full demand. Review both plan modes in the results.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {activeScenario.solveError && (
-            <div className="mt-4 p-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-md flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              <div className="text-sm font-medium leading-none">
-                Backend Connection Issue
-                <p className="text-xs font-normal mt-1 opacity-90">{activeScenario.solveError}</p>
-              </div>
-            </div>
-          )}
-
-          {activeScenario.decisionStatus === "infeasible" && (
-            <div className="mt-4 p-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-md flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              <div className="text-sm font-medium leading-none">
-                Infeasible Scenario
-                <p className="text-xs font-normal mt-1 opacity-90">{activeScenario.errorMessage}</p>
-              </div>
-            </div>
-          )}
         </div>
 
       </CardContent>
