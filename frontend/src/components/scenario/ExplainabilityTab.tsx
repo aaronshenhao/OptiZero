@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Factory,
   Gauge,
+  Info,
   Lightbulb,
   Scale,
   ShieldAlert,
@@ -300,10 +301,13 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
     <Card>
       <CardHeader className={cn(constraints.length === 0 && hasPlan && "pb-3")}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <ShieldAlert className="h-5 w-5 text-orange-500" />
-            Constraint Watchlist
-          </CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ShieldAlert className="h-5 w-5 text-orange-500" />
+              Constraint Watchlist
+            </CardTitle>
+            <ConstraintWatchlistInfo />
+          </div>
           <span className={cn("w-fit rounded-full px-2.5 py-1 text-xs font-semibold", status.className)}>
             {status.label}
           </span>
@@ -320,9 +324,6 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
           </p>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm leading-6 text-muted-foreground">
-              These show which limits are tight in the selected plan; the trade-off panel shows whether carbon compliance and full demand conflict.
-            </p>
             <div className="overflow-hidden rounded-md border">
               <Table>
                 <TableHeader className="bg-muted/50">
@@ -356,6 +357,32 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ConstraintWatchlistInfo() {
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        aria-label="Explain constraint watchlist"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <Info className="h-4 w-4" />
+      </button>
+      <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-80 -translate-x-1/2 rounded-md border bg-card p-3 text-xs leading-5 text-card-foreground opacity-100 shadow-xl ring-1 ring-border group-hover:block group-focus-within:block">
+        <div className="font-semibold text-foreground">How to read this</div>
+        <p className="mt-1 text-muted-foreground">
+          The watchlist flags limits that are tight, valuable to relax, or already violated by a soft trade-off.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          A soft violation means the optimizer used a fallback variable, such as unmet demand or carbon overage, instead of failing the scenario outright.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          “High marginal value” is not a violation; it means relaxing that limit could materially improve the plan. “Unmet demand” and “High penalty” identify soft trade-offs.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -895,7 +922,7 @@ function formatImpactSignal(item: WatchlistItem) {
   if (isPenaltyDrivenConstraint(item)) return "High penalty";
 
   const absoluteValue = Math.abs(item.marginalValue);
-  if (isImplausiblyHighMarginalValue(item)) return "High impact";
+  if (isImplausiblyHighMarginalValue(item)) return "High marginal value";
 
   const unit = item.group === "Carbon" ? "/kg" : item.group === "Capacity" ? "/hr" : "";
   const sign = item.marginalValue < 0 ? "-" : "";
