@@ -128,7 +128,7 @@ export function ExplainabilityTab() {
           type: "Overtime",
         }]
       : []),
-  ].sort((a, b) => b.lift - a.lift).slice(0, 7) : [];
+  ].filter((item) => hasPositiveSensitivityLift(item.lift)).sort((a, b) => b.lift - a.lift).slice(0, 7) : [];
 
   return (
     <div className="grid h-full grid-cols-1 gap-6 xl:grid-cols-4">
@@ -235,6 +235,10 @@ function Recommendations({
   isLoading: boolean;
   error?: string;
 }) {
+  const visibleRecommendations = recommendations.filter((item) => (
+    item.decision_status_improved || hasPositiveSensitivityLift(item.profit_delta_usd)
+  ));
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -246,8 +250,8 @@ function Recommendations({
       <CardContent className="space-y-3">
         {isLoading && <EmptyState text="Testing investment levers..." />}
         {!isLoading && error && <EmptyState text="Using the current solve only until explainability is available." />}
-        {!isLoading && !error && recommendations.length === 0 && <EmptyState text="No material intervention is recommended for this scenario." />}
-        {!isLoading && recommendations.map((item) => (
+        {!isLoading && !error && visibleRecommendations.length === 0 && <EmptyState text="No positive profit levers detected for this scenario." />}
+        {!isLoading && visibleRecommendations.map((item) => (
           <div key={`${item.label}-${item.target}`} className="rounded-md border bg-background p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -299,7 +303,7 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
                 <TableRow>
                   <TableHead>Constraint</TableHead>
                   <TableHead>Group</TableHead>
-                  <TableHead className="text-right">Slack</TableHead>
+                  <TableHead className="text-right">Headroom</TableHead>
                   <TableHead className="text-right">Marginal Value</TableHead>
                 </TableRow>
               </TableHeader>
@@ -361,7 +365,7 @@ function SensitivityChart({ data, isLoading }: { data: Array<{ name: string; lif
       <CardContent className="h-80">
         {isLoading || data.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
-            {isLoading ? "Re-solving lever scenarios..." : "No sensitivity data yet."}
+            {isLoading ? "Re-solving lever scenarios..." : "No positive profit levers detected for this scenario."}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -380,6 +384,8 @@ function SensitivityChart({ data, isLoading }: { data: Array<{ name: string; lif
 }
 
 function OperatingBottlenecks({ rows, hasPlan }: { rows: FacilityUtilization[]; hasPlan: boolean }) {
+  const { visibleRows, hiddenIdleCount } = getVisibleBottleneckRows(rows);
+
   return (
     <Card>
       <CardHeader>
@@ -389,11 +395,11 @@ function OperatingBottlenecks({ rows, hasPlan }: { rows: FacilityUtilization[]; 
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {!hasPlan || rows.length === 0 ? (
+        {!hasPlan || visibleRows.length === 0 ? (
           <EmptyState text="Run a feasible scenario to see capacity utilization." />
         ) : (
           <div className="space-y-3">
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <div key={row.facilityId} className="rounded-md border bg-background p-3">
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="font-medium">{row.facilityName}</span>
@@ -411,6 +417,11 @@ function OperatingBottlenecks({ rows, hasPlan }: { rows: FacilityUtilization[]; 
                 </div>
               </div>
             ))}
+            {hiddenIdleCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {hiddenIdleCount} idle {hiddenIdleCount === 1 ? "facility" : "facilities"} hidden.
+              </p>
+            )}
           </div>
         )}
       </CardContent>
@@ -453,7 +464,7 @@ function TradeoffExplanation({
               <BriefMetric label="Selected plan" value={selectedPlan?.mode ? readableMode(selectedPlan.mode) : "No plan"} />
               <BriefMetric label="Compliance demand" value={`${(compliancePlan?.demand_met_pct ?? 0).toFixed(1)}%`} />
               <BriefMetric label="Profit delta" value={formatMoney(tradeoffSummary.profit_delta_usd_if_compliance_protected)} />
-              <BriefMetric label="Carbon overage" value={`${kgToTons(compliancePlan?.carbon_overage_kg).toLocaleString()} t`} />
+              <BriefMetric label="Selected plan overage" value={`${kgToTons(selectedPlan?.carbon_overage_kg).toLocaleString()} t`} />
             </div>
           </div>
         )}
@@ -596,6 +607,11 @@ function hasConstraintSignal(slack: number, marginalValue: number) {
   return Math.abs(slack) > slackEpsilon || Math.abs(marginalValue) >= moneyDisplayEpsilon;
 }
 
+function hasPositiveSensitivityLift(value: number) {
+  const moneyDisplayEpsilon = 5000;
+  return Number.isFinite(value) && value >= moneyDisplayEpsilon;
+}
+
 function hasRisk(selectedPlan: OptimizationPlan | null, scenarioStatus: string) {
   return (
     scenarioStatus === "infeasible" ||
@@ -634,6 +650,14 @@ function buildFacilityUtilization(
       status,
     };
   }).sort((a, b) => b.utilizationPct - a.utilizationPct);
+}
+
+function getVisibleBottleneckRows(rows: FacilityUtilization[]) {
+  const visibleRows = rows.filter((row) => row.usedHours > 0 || row.status !== "Available");
+  return {
+    visibleRows,
+    hiddenIdleCount: rows.length - visibleRows.length,
+  };
 }
 
 function buildRouteRationale(selectedPlan: OptimizationPlan | null, demoData: DemoDataResponse | null): RouteRationale[] {
