@@ -206,7 +206,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
         scenarios: state.scenarios.map((item) => {
           if (item.id !== id) return item;
 
-          const selectedPlanMode = defaultPlanModeForResponse(response, item.allowUnmetDemand);
+          const selectedPlanMode = preferredPlanModeForResponse(response, item.selectedPlanMode);
           return applySelectedPlan({
             ...item,
             decisionStatus: response.decision_status,
@@ -377,9 +377,11 @@ export function selectPlan(scenario: Scenario): OptimizationPlan | null {
   return getSelectedPlan(scenario.solveResult, scenario.selectedPlanMode);
 }
 
-function defaultPlanModeForResponse(response: SolveResponse, allowUnmetDemand: boolean): PlanMode {
-  if (response.decision_status !== "tradeoff_required") return "protect_demand";
-  return allowUnmetDemand && response.plans.protect_compliance ? "protect_compliance" : "protect_demand";
+function preferredPlanModeForResponse(response: SolveResponse, currentMode: PlanMode): PlanMode {
+  if (response.plans[currentMode]?.status === "Optimal") return currentMode;
+  if (response.plans.protect_demand?.status === "Optimal") return "protect_demand";
+  if (response.plans.protect_compliance?.status === "Optimal") return "protect_compliance";
+  return "protect_demand";
 }
 
 function applySelectedPlan(scenario: Scenario): Scenario {

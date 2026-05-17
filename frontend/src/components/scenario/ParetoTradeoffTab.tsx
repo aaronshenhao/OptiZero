@@ -44,7 +44,6 @@ export function ParetoTradeoffTab() {
     activeScenario?.carbonCap,
     activeScenario?.factoryOutage,
     activeScenario?.demandSurge,
-    activeScenario?.allowUnmetDemand,
     activeScenario?.maxOvertimePct,
     generateParetoFrontier,
   ]);

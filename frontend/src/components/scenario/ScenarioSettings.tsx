@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useScenarioStore } from "../../store/scenarioStore";
 import { Label } from "../ui/label";
 import { Slider } from "../ui/slider";
-import { Switch } from "../ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { AlertTriangle, Clock, TrendingUp, Factory, Zap } from "lucide-react";
 
@@ -20,7 +19,6 @@ export function ScenarioSettings() {
     activeScenario?.carbonCap, 
     activeScenario?.factoryOutage, 
     activeScenario?.demandSurge, 
-    activeScenario?.allowUnmetDemand, 
     activeScenario?.maxOvertimePct,
     activeScenario?.id, 
     runSimulation
@@ -116,21 +114,10 @@ export function ScenarioSettings() {
           </div>
         </div>
 
-        {/* Guardrails Section */}
+        {/* Scenario Status Section */}
         <div className="space-y-4">
           <div className="flex items-center gap-2 border-b pb-2 mt-4">
-            <h4 className="font-semibold text-sm uppercase text-muted-foreground tracking-wider">Guardrails</h4>
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <div className="space-y-0.5">
-              <Label>Allow Unmet Demand</Label>
-              <p className="text-xs text-muted-foreground">When a trade-off exists, prefer the compliance-protected plan.</p>
-            </div>
-            <Switch 
-              checked={activeScenario.allowUnmetDemand} 
-              onCheckedChange={(checked) => updateScenarioInputs(activeScenario.id, { allowUnmetDemand: checked })} 
-            />
+            <h4 className="font-semibold text-sm uppercase text-muted-foreground tracking-wider">Scenario Status</h4>
           </div>
           
           {activeScenario.decisionStatus === "tradeoff_required" && (

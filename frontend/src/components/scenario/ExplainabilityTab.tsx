@@ -24,10 +24,10 @@ import {
   fetchDemoData,
   kgToTons,
   type DemoDataResponse,
+  type CapacitySensitivity,
   type ExplainabilityRecommendation,
   type OptimizationPlan,
   type ProductionAllocation,
-  type RelaxedConstraint,
 } from "../../services/optimizerApi";
 import { cn } from "../../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -47,6 +47,10 @@ type FacilityUtilization = {
   availableHours: number;
   utilizationPct: number;
   status: "Binding" | "Tight" | "Available";
+  topLoads: {
+    productName: string;
+    hoursUsed: number;
+  }[];
 };
 
 type RouteRationale = ProductionAllocation & {
@@ -65,7 +69,6 @@ export function ExplainabilityTab() {
   const carbonCap = activeScenario?.carbonCap;
   const factoryOutage = activeScenario?.factoryOutage;
   const demandSurge = activeScenario?.demandSurge;
-  const allowUnmetDemand = activeScenario?.allowUnmetDemand;
   const maxOvertimePct = activeScenario?.maxOvertimePct;
 
   useEffect(() => {
@@ -83,7 +86,6 @@ export function ExplainabilityTab() {
     carbonCap,
     factoryOutage,
     demandSurge,
-    allowUnmetDemand,
     maxOvertimePct,
     generateExplainability,
   ]);
@@ -168,25 +170,23 @@ export function ExplainabilityTab() {
           </Card>
         )}
 
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6">
           <ConstraintWatchlist constraints={watchlist} hasPlan={hasPlan} />
           <SensitivityChart data={sensitivityData} isLoading={activeScenario.isExplainLoading} />
         </div>
 
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
-          <OperatingBottlenecks rows={facilityUtilization} hasPlan={hasPlan} />
-          <TradeoffExplanation
-            selectedPlan={selectedPlan}
-            compliancePlan={compliancePlan}
-            tradeoffSummary={tradeoffSummary}
-          />
-        </div>
+        <TradeoffExplanation
+          selectedPlan={selectedPlan}
+          compliancePlan={compliancePlan}
+          tradeoffSummary={tradeoffSummary}
+          demoData={demoData}
+        />
+
+        {hasSelectedPlanRisk && <RiskPanel selectedPlan={selectedPlan} scenarioStatus={activeScenario.decisionStatus} demoData={demoData} />}
 
         <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
-          {hasSelectedPlanRisk && <RiskPanel selectedPlan={selectedPlan} scenarioStatus={activeScenario.decisionStatus} />}
-          <div className={cn(!hasSelectedPlanRisk && "2xl:col-span-2")}>
-            <RouteRationaleTable rows={routeRationale} hasPlan={hasPlan} />
-          </div>
+          <OperatingBottlenecks rows={facilityUtilization} hasPlan={hasPlan} capacitySensitivities={explainResult?.capacity_sensitivities ?? []} />
+          <RouteRationaleTable rows={routeRationale} hasPlan={hasPlan} />
         </div>
       </div>
     </div>
@@ -300,34 +300,39 @@ function ConstraintWatchlist({ constraints, hasPlan }: { constraints: ReturnType
             Current plan has no material capacity, carbon, or demand constraints with measurable economic impact.
           </p>
         ) : (
-          <div className="overflow-hidden rounded-md border">
-            <Table>
-              <TableHeader className="bg-muted/50">
-                <TableRow>
-                  <TableHead>Constraint</TableHead>
-                  <TableHead>Group</TableHead>
-                  <TableHead className="text-right">Headroom</TableHead>
-                  <TableHead className="text-right">Marginal Value</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {constraints.map((item) => (
-                  <TableRow key={item.name}>
-                    <TableCell>
-                      <div className="font-medium">{item.label}</div>
-                      <div className="text-xs text-muted-foreground">{item.meaning}</div>
-                    </TableCell>
-                    <TableCell>
-                      <span className={cn("rounded-full px-2 py-1 text-xs font-medium", groupBadgeClass(item.group))}>
-                        {item.group}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">{formatConstraintSlack(item)}</TableCell>
-                    <TableCell className="text-right">{formatMoney(item.marginalValue)}</TableCell>
+          <div className="space-y-3">
+            <p className="text-sm leading-6 text-muted-foreground">
+              These show which limits are tight in the selected plan; the trade-off panel shows whether carbon compliance and full demand conflict.
+            </p>
+            <div className="overflow-hidden rounded-md border">
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead>Constraint</TableHead>
+                    <TableHead>Group</TableHead>
+                    <TableHead className="text-right">Headroom</TableHead>
+                    <TableHead className="text-right">Marginal Value</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {constraints.map((item) => (
+                    <TableRow key={item.name}>
+                      <TableCell>
+                        <div className="font-medium">{item.label}</div>
+                        <div className="text-xs text-muted-foreground">{item.meaning}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("rounded-full px-2 py-1 text-xs font-medium", groupBadgeClass(item.group))}>
+                          {item.group}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">{formatConstraintSlack(item)}</TableCell>
+                      <TableCell className="text-right">{formatMarginalValue(item)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         )}
       </CardContent>
@@ -386,7 +391,15 @@ function SensitivityChart({ data, isLoading }: { data: Array<{ name: string; lif
   );
 }
 
-function OperatingBottlenecks({ rows, hasPlan }: { rows: FacilityUtilization[]; hasPlan: boolean }) {
+function OperatingBottlenecks({
+  rows,
+  hasPlan,
+  capacitySensitivities,
+}: {
+  rows: FacilityUtilization[];
+  hasPlan: boolean;
+  capacitySensitivities: CapacitySensitivity[];
+}) {
   const { visibleRows, hiddenIdleCount } = getVisibleBottleneckRows(rows);
 
   return (
@@ -402,24 +415,41 @@ function OperatingBottlenecks({ rows, hasPlan }: { rows: FacilityUtilization[]; 
           <EmptyState text="Run a feasible scenario to see capacity utilization." />
         ) : (
           <div className="space-y-3">
-            {visibleRows.map((row) => (
-              <div key={row.facilityId} className="rounded-md border bg-background p-3">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-medium">{row.facilityName}</span>
-                  <span className={cn("rounded-full px-2 py-1 text-xs font-medium", utilizationBadgeClass(row.status))}>{row.status}</span>
+            <div className="rounded-md border bg-blue-500/5 p-3 text-xs leading-5 text-muted-foreground">
+              Binding means all available operating hours are used in the selected plan. It does not prove the factory caused a carbon trade-off; use the +10% capacity impact to see whether expansion helps.
+            </div>
+            {visibleRows.map((row) => {
+              const sensitivity = capacitySensitivities.find((item) => item.facility_id === row.facilityId);
+              return (
+                <div key={row.facilityId} className="rounded-md border bg-background p-3">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium">{row.facilityName}</span>
+                    <span className={cn("rounded-full px-2 py-1 text-xs font-medium", utilizationBadgeClass(row.status))}>{row.status}</span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-muted">
+                    <div
+                      className={cn("h-2 rounded-full", row.utilizationPct >= 98 ? "bg-orange-500" : row.utilizationPct >= 85 ? "bg-blue-500" : "bg-emerald-500")}
+                      style={{ width: `${Math.min(100, row.utilizationPct)}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+                    <span>{row.utilizationPct.toFixed(1)}% utilized</span>
+                    <span>{Math.round(row.usedHours).toLocaleString()} / {Math.round(row.availableHours).toLocaleString()} hrs</span>
+                  </div>
+                  {row.topLoads.length > 0 && (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Main load: {row.topLoads.map((load) => `${load.productName} ${Math.round(load.hoursUsed).toLocaleString()} hrs`).join(", ")}
+                    </div>
+                  )}
+                  {sensitivity && (
+                    <div className="mt-3 rounded-md bg-muted/40 p-2 text-xs">
+                      <span className="font-medium">+10% capacity impact: </span>
+                      <span className="text-muted-foreground">{formatCapacityImpact(sensitivity)}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-muted">
-                  <div
-                    className={cn("h-2 rounded-full", row.utilizationPct >= 98 ? "bg-orange-500" : row.utilizationPct >= 85 ? "bg-blue-500" : "bg-emerald-500")}
-                    style={{ width: `${Math.min(100, row.utilizationPct)}%` }}
-                  />
-                </div>
-                <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span>{row.utilizationPct.toFixed(1)}% utilized</span>
-                  <span>{Math.round(row.usedHours).toLocaleString()} / {Math.round(row.availableHours).toLocaleString()} hrs</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {hiddenIdleCount > 0 && (
               <p className="text-xs text-muted-foreground">
                 {hiddenIdleCount} idle {hiddenIdleCount === 1 ? "facility" : "facilities"} hidden.
@@ -436,11 +466,18 @@ function TradeoffExplanation({
   selectedPlan,
   compliancePlan,
   tradeoffSummary,
+  demoData,
 }: {
   selectedPlan: OptimizationPlan | null;
   compliancePlan?: OptimizationPlan | null;
   tradeoffSummary?: { carbon_gap_kg_if_demand_protected: number; unmet_demand_units_if_compliance_protected: number; profit_delta_usd_if_compliance_protected: number } | null;
+  demoData: DemoDataResponse | null;
 }) {
+  const complianceShortfalls = (compliancePlan?.demand_shortfalls ?? [])
+    .slice()
+    .sort((a, b) => b.unmet_units - a.unmet_units)
+    .slice(0, 2);
+
   return (
     <Card>
       <CardHeader>
@@ -461,14 +498,27 @@ function TradeoffExplanation({
         ) : (
           <div className="space-y-4">
             <p className="text-sm leading-6 text-muted-foreground">
-              Full-demand operations exceed the cap by {kgToTons(tradeoffSummary.carbon_gap_kg_if_demand_protected).toLocaleString()} t. The compliance-protected plan respects the cap but leaves {tradeoffSummary.unmet_demand_units_if_compliance_protected.toLocaleString()} units unmet.
+              Full-demand operations exceed the cap by {kgToTons(tradeoffSummary.carbon_gap_kg_if_demand_protected).toLocaleString()} t. The compliance-protected plan respects the cap, but unmet demand is the cost of staying within carbon under current routes and capacity.
             </p>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <BriefMetric label="Selected plan" value={selectedPlan?.mode ? readableMode(selectedPlan.mode) : "No plan"} />
               <BriefMetric label="Compliance demand" value={`${(compliancePlan?.demand_met_pct ?? 0).toFixed(1)}%`} />
               <BriefMetric label="Profit delta" value={formatMoney(tradeoffSummary.profit_delta_usd_if_compliance_protected)} />
-              <BriefMetric label="Selected plan overage" value={`${kgToTons(selectedPlan?.carbon_overage_kg).toLocaleString()} t`} />
+              <BriefMetric label="Unmet demand" value={`${tradeoffSummary.unmet_demand_units_if_compliance_protected.toLocaleString()} units`} />
             </div>
+            {complianceShortfalls.length > 0 && (
+              <div className="rounded-md border bg-background p-3 text-sm">
+                <div className="font-semibold">Top compliance shortfalls</div>
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {complianceShortfalls.map((item) => (
+                    <div key={item.product_id} className="flex justify-between gap-3">
+                      <span>{getProductName(item.product_id, demoData)}</span>
+                      <span>{item.unmet_units.toLocaleString()} units</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -476,8 +526,8 @@ function TradeoffExplanation({
   );
 }
 
-function RiskPanel({ selectedPlan, scenarioStatus }: { selectedPlan: OptimizationPlan | null; scenarioStatus: string }) {
-  const relaxed = selectedPlan?.relaxed_constraints ?? [];
+function RiskPanel({ selectedPlan, scenarioStatus, demoData }: { selectedPlan: OptimizationPlan | null; scenarioStatus: string; demoData: DemoDataResponse | null }) {
+  const fallbackRelaxed = ((selectedPlan?.relaxed_constraints ?? []) as Array<{ constraint_name: string; type: string }>).filter((item) => item.type !== "carbon_cap" && item.type !== "demand");
   const shortfalls = selectedPlan?.demand_shortfalls ?? [];
   const carbonOverage = selectedPlan?.carbon_overage_kg ?? 0;
 
@@ -493,10 +543,10 @@ function RiskPanel({ selectedPlan, scenarioStatus }: { selectedPlan: Optimizatio
         {scenarioStatus === "infeasible" && <RiskRow title="Infeasible scenario" detail={selectedPlan?.error ?? "The hard constraints cannot produce a valid plan."} />}
         {carbonOverage > 0 && <RiskRow title="Carbon compliance gap" detail={`${kgToTons(carbonOverage).toLocaleString()} t above the active cap if demand is protected.`} />}
         {shortfalls.map((item) => (
-          <RiskRow key={item.product_id} title={`Demand shortfall: ${item.product_id}`} detail={`${item.unmet_units.toLocaleString()} units unmet under compliance protection.`} />
+          <RiskRow key={item.product_id} title={`Demand shortfall: ${getProductName(item.product_id, demoData)}`} detail={`${item.unmet_units.toLocaleString()} units unmet under compliance protection.`} />
         ))}
-        {relaxed.map((item) => (
-          <RiskRow key={item.constraint_name} title={readableRelaxedConstraint(item)} detail="The solver had to relax this business guardrail to produce the selected plan." />
+        {fallbackRelaxed.map((item) => (
+          <RiskRow key={item.constraint_name} title={readableFallbackRelaxedConstraint(item)} detail="The solver had to relax this business guardrail to produce the selected plan." />
         ))}
       </CardContent>
     </Card>
@@ -566,7 +616,7 @@ function EmptyState({ text }: { text: string }) {
 
 function RiskRow({ title, detail }: { title: string; detail: string }) {
   return (
-    <div className="rounded-md border bg-destructive/5 p-3 text-sm">
+    <div className="rounded-md border bg-background px-3 py-2 text-sm">
       <div className="font-semibold text-destructive">{title}</div>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>
     </div>
@@ -606,13 +656,25 @@ function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDat
 
 function hasConstraintSignal(slack: number, marginalValue: number) {
   const slackEpsilon = 0.005;
-  const moneyDisplayEpsilon = 5000;
+  const moneyDisplayEpsilon = 0.005;
   return Math.abs(slack) > slackEpsilon || Math.abs(marginalValue) >= moneyDisplayEpsilon;
 }
 
 function hasPositiveSensitivityLift(value: number) {
   const moneyDisplayEpsilon = 5000;
   return Number.isFinite(value) && value >= moneyDisplayEpsilon;
+}
+
+function formatCapacityImpact(item: CapacitySensitivity) {
+  const hasProfitLift = hasPositiveSensitivityLift(item.profit_delta_usd);
+  const hasDemandLift = Math.abs(item.demand_met_delta_pct) >= 0.05;
+
+  if (!item.decision_status_improved && !hasProfitLift && !hasDemandLift) {
+    return "Extra capacity has limited modeled benefit.";
+  }
+
+  const statusText = item.decision_status_improved ? "improves status, " : "";
+  return `${statusText}${formatMoneyChange(item.profit_delta_usd)} profit, ${formatSigned(item.demand_met_delta_pct)} demand pts`;
 }
 
 function hasRisk(selectedPlan: OptimizationPlan | null, scenarioStatus: string) {
@@ -632,10 +694,17 @@ function buildFacilityUtilization(
   if (!selectedPlan?.production_plan || !demoData || !activeScenario) return [];
 
   const usedHours = new Map<string, number>();
+  const loadsByFacility = new Map<string, { productName: string; hoursUsed: number }[]>();
   selectedPlan.production_plan.forEach((allocation) => {
     const route = demoData.routes.find((item) => item.facility_id === allocation.facility_id && item.product_id === allocation.product_id);
     const hours = allocation.units_assigned * (route?.hours_per_unit ?? 0);
     usedHours.set(allocation.facility_id, (usedHours.get(allocation.facility_id) ?? 0) + hours);
+    const facilityLoads = loadsByFacility.get(allocation.facility_id) ?? [];
+    facilityLoads.push({
+      productName: getProductName(allocation.product_id, demoData),
+      hoursUsed: hours,
+    });
+    loadsByFacility.set(allocation.facility_id, facilityLoads);
   });
 
   return demoData.facilities.map((facility) => {
@@ -651,6 +720,9 @@ function buildFacilityUtilization(
       availableHours,
       utilizationPct,
       status,
+      topLoads: (loadsByFacility.get(facility.id) ?? [])
+        .sort((a, b) => b.hoursUsed - a.hoursUsed)
+        .slice(0, 2),
     };
   }).sort((a, b) => b.utilizationPct - a.utilizationPct);
 }
@@ -708,6 +780,13 @@ function readableConstraintName(name: string, demoData: DemoDataResponse | null)
   const capacityFacilityId = name.startsWith("Capacity_") ? name.replace("Capacity_", "") : null;
   if (capacityFacilityId) return `Capacity: ${getFacilityName(capacityFacilityId, demoData)}`;
 
+  const demandProductId = name.startsWith("Soft_Demand_")
+    ? name.replace("Soft_Demand_", "")
+    : name.startsWith("Demand_")
+      ? name.replace("Demand_", "")
+      : null;
+  if (demandProductId) return `Demand: ${getProductName(demandProductId, demoData)}`;
+
   return name
     .replace("Hard_Global_Carbon_Cap", "Hard carbon cap")
     .replace("Soft_Global_Carbon_Cap", "Carbon cap with overage variable")
@@ -724,9 +803,8 @@ function constraintMeaning(name: string, group: string) {
   return "The solver marked this constraint as economically relevant.";
 }
 
-function readableRelaxedConstraint(item: RelaxedConstraint) {
-  if (item.type === "carbon_cap") return `Relaxed carbon cap by ${kgToTons(item.relaxed_by_kg).toLocaleString()} t`;
-  return `Relaxed demand for ${item.product_id} by ${item.relaxed_by_units.toLocaleString()} units`;
+function readableFallbackRelaxedConstraint(item: { constraint_name: string }) {
+  return item.constraint_name.replaceAll("_", " ");
 }
 
 function formatConstraintSlack(item: ReturnType<typeof buildWatchlist>[number]) {
@@ -735,8 +813,18 @@ function formatConstraintSlack(item: ReturnType<typeof buildWatchlist>[number]) 
   return Math.abs(item.slack).toLocaleString();
 }
 
+function formatMarginalValue(item: ReturnType<typeof buildWatchlist>[number]) {
+  const unit = item.group === "Carbon" ? "/kg" : item.group === "Capacity" ? "/hr" : item.group === "Demand" ? "/unit" : "";
+  const sign = item.marginalValue < 0 ? "-" : "";
+  return `${sign}$${Math.abs(item.marginalValue).toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}`;
+}
+
 function getFacilityName(facilityId: string, demoData: DemoDataResponse | null) {
   return demoData?.facilities.find((facility) => facility.id === facilityId)?.name ?? facilityId;
+}
+
+function getProductName(productId: string, demoData: DemoDataResponse | null) {
+  return demoData?.products.find((product) => product.id === productId)?.name ?? productId;
 }
 
 function formatRecommendationTitle(item: ExplainabilityRecommendation, demoData: DemoDataResponse | null) {
@@ -753,6 +841,11 @@ function readableMode(mode: string) {
 
 function formatMoney(value: number) {
   const sign = value < 0 ? "-" : "";
+  return `${sign}$${Math.abs(value / 1000000).toFixed(2)}M`;
+}
+
+function formatMoneyChange(value: number) {
+  const sign = value >= 0 ? "+" : "-";
   return `${sign}$${Math.abs(value / 1000000).toFixed(2)}M`;
 }
 
