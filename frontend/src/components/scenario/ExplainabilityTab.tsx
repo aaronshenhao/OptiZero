@@ -99,8 +99,8 @@ export function ExplainabilityTab() {
   );
 
   const watchlist = useMemo(
-    () => buildWatchlist(selectedPlan),
-    [selectedPlan]
+    () => buildWatchlist(selectedPlan, demoData),
+    [demoData, selectedPlan]
   );
 
   if (!activeScenario) return null;
@@ -112,18 +112,18 @@ export function ExplainabilityTab() {
   const hasSelectedPlanRisk = hasRisk(selectedPlan, activeScenario.decisionStatus);
   const sensitivityData = explainResult ? [
     ...explainResult.capacity_sensitivities.map((item) => ({
-      name: labelFacility(item.facility_id, demoData),
+      name: `${getFacilityName(item.facility_id, demoData)} +10% capacity`,
       lift: item.profit_delta_usd,
       type: "Capacity",
     })),
     ...explainResult.carbon_sensitivities.map((item) => ({
-      name: `Cap +${item.relaxation_pct}%`,
+      name: `Carbon cap +${item.relaxation_pct}%`,
       lift: item.profit_delta_usd,
       type: "Carbon",
     })),
     ...(explainResult.overtime_sensitivity
       ? [{
-          name: `OT +${explainResult.overtime_sensitivity.added_overtime_pct}%`,
+          name: `Overtime +${explainResult.overtime_sensitivity.added_overtime_pct} pts`,
           lift: explainResult.overtime_sensitivity.profit_delta_usd,
           type: "Overtime",
         }]
@@ -151,6 +151,7 @@ export function ExplainabilityTab() {
           recommendations={explainResult?.recommendations ?? []}
           isLoading={activeScenario.isExplainLoading}
           error={activeScenario.explainError}
+          demoData={demoData}
         />
       </div>
 
@@ -230,10 +231,12 @@ function Recommendations({
   recommendations,
   isLoading,
   error,
+  demoData,
 }: {
   recommendations: ExplainabilityRecommendation[];
   isLoading: boolean;
   error?: string;
+  demoData: DemoDataResponse | null;
 }) {
   const visibleRecommendations = recommendations.filter((item) => (
     item.decision_status_improved || hasPositiveSensitivityLift(item.profit_delta_usd)
@@ -255,7 +258,7 @@ function Recommendations({
           <div key={`${item.label}-${item.target}`} className="rounded-md border bg-background p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold">{item.title}</div>
+                <div className="text-sm font-semibold">{formatRecommendationTitle(item, demoData)}</div>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.rationale}</p>
               </div>
               <StatusPill improved={item.decision_status_improved} />
@@ -369,10 +372,10 @@ function SensitivityChart({ data, isLoading }: { data: Array<{ name: string; lif
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ top: 8, right: 24, left: 36, bottom: 8 }}>
+            <BarChart data={data} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.35} />
               <XAxis type="number" tickFormatter={formatMoneyShort} />
-              <YAxis dataKey="name" type="category" width={92} tick={{ fontSize: 12 }} />
+              <YAxis dataKey="name" type="category" width={170} tick={{ fontSize: 11 }} />
               <Tooltip formatter={(value) => [formatMoney(Number(value)), "Profit lift"]} labelFormatter={(label) => `${label}`} />
               <Bar dataKey="lift" fill="#059669" radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -578,7 +581,7 @@ function StatusPill({ improved }: { improved: boolean }) {
   );
 }
 
-function buildWatchlist(selectedPlan: OptimizationPlan | null) {
+function buildWatchlist(selectedPlan: OptimizationPlan | null, demoData: DemoDataResponse | null) {
   const demandHasIssue =
     (selectedPlan?.demand_met_pct ?? 100) < 99.99 ||
     (selectedPlan?.demand_shortfalls?.length ?? 0) > 0 ||
@@ -589,7 +592,7 @@ function buildWatchlist(selectedPlan: OptimizationPlan | null) {
       const group = constraintGroup(constraint.constraint_name);
       return {
         name: constraint.constraint_name,
-        label: readableConstraintName(constraint.constraint_name),
+        label: readableConstraintName(constraint.constraint_name, demoData),
         group,
         slack: constraint.slack,
         marginalValue: constraint.marginal_value,
@@ -701,12 +704,14 @@ function constraintGroup(name: string) {
   return "Other";
 }
 
-function readableConstraintName(name: string) {
+function readableConstraintName(name: string, demoData: DemoDataResponse | null) {
+  const capacityFacilityId = name.startsWith("Capacity_") ? name.replace("Capacity_", "") : null;
+  if (capacityFacilityId) return `Capacity: ${getFacilityName(capacityFacilityId, demoData)}`;
+
   return name
     .replace("Hard_Global_Carbon_Cap", "Hard carbon cap")
     .replace("Soft_Global_Carbon_Cap", "Carbon cap with overage variable")
     .replace("Global_Carbon_Cap", "Global carbon cap")
-    .replace("Capacity_", "Capacity: ")
     .replace("Demand_", "Demand: ")
     .replace("Soft_Demand_", "Demand with shortfall: ")
     .replaceAll("_", " ");
@@ -730,9 +735,16 @@ function formatConstraintSlack(item: ReturnType<typeof buildWatchlist>[number]) 
   return Math.abs(item.slack).toLocaleString();
 }
 
-function labelFacility(facilityId: string, demoData: DemoDataResponse | null) {
-  const name = demoData?.facilities.find((facility) => facility.id === facilityId)?.name ?? facilityId;
-  return name.replace(/^Factory\s+/i, "F");
+function getFacilityName(facilityId: string, demoData: DemoDataResponse | null) {
+  return demoData?.facilities.find((facility) => facility.id === facilityId)?.name ?? facilityId;
+}
+
+function formatRecommendationTitle(item: ExplainabilityRecommendation, demoData: DemoDataResponse | null) {
+  if (item.label === "add_capacity") {
+    return `Add capacity at ${getFacilityName(item.target, demoData)}`;
+  }
+
+  return item.title;
 }
 
 function readableMode(mode: string) {

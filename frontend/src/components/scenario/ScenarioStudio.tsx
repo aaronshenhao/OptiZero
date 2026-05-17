@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft, CheckCircle2 } from "lucide-react";
 import { ScenarioSettings } from "./ScenarioSettings";
 import { KPIGrid } from "./KPIGrid";
@@ -13,7 +14,7 @@ import {
   TableRow,
 } from "../ui/table";
 import { cn } from "../../lib/utils";
-import { kgToTons, type PlanMode } from "../../services/optimizerApi";
+import { fetchDemoData, kgToTons, type DemoDataResponse, type PlanMode } from "../../services/optimizerApi";
 
 export function ScenarioStudio() {
   const { scenarios, activeScenarioId, setSelectedPlanMode } = useScenarioStore();
@@ -21,6 +22,11 @@ export function ScenarioStudio() {
   const selectedPlan = activeScenario ? selectPlan(activeScenario) : null;
   const compliancePlan = activeScenario?.solveResult?.plans.protect_compliance;
   const canComparePlans = activeScenario?.decisionStatus === "tradeoff_required" && !!compliancePlan;
+  const [demoData, setDemoData] = useState<DemoDataResponse | null>(null);
+
+  useEffect(() => {
+    fetchDemoData().then(setDemoData).catch(() => setDemoData(null));
+  }, []);
 
   if (!activeScenario) return null;
 
@@ -95,7 +101,7 @@ export function ScenarioStudio() {
               <CardTitle className="text-lg">Plan Matrix (Selected Plan)</CardTitle>
             </CardHeader>
             <CardContent>
-              <PlanMatrix selectedPlan={selectedPlan} />
+              <PlanMatrix selectedPlan={selectedPlan} demoData={demoData} />
             </CardContent>
           </Card>
 
@@ -158,7 +164,7 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PlanMatrix({ selectedPlan }: { selectedPlan: ReturnType<typeof selectPlan> }) {
+function PlanMatrix({ selectedPlan, demoData }: { selectedPlan: ReturnType<typeof selectPlan>; demoData: DemoDataResponse | null }) {
   const allocations = selectedPlan?.production_plan ?? [];
 
   if (!selectedPlan || selectedPlan.status !== "Optimal") {
@@ -187,7 +193,10 @@ function PlanMatrix({ selectedPlan }: { selectedPlan: ReturnType<typeof selectPl
         <TableBody>
           {allocations.map((allocation) => (
             <TableRow key={`${allocation.facility_id}-${allocation.product_id}`}>
-              <TableCell className="font-medium">{allocation.facility_id}</TableCell>
+              <TableCell>
+                <div className="font-medium">{getFacilityName(allocation.facility_id, demoData)}</div>
+                <div className="text-xs text-muted-foreground">{allocation.facility_id}</div>
+              </TableCell>
               <TableCell>{allocation.product_id}</TableCell>
               <TableCell className="text-right">{allocation.units_assigned.toLocaleString()}</TableCell>
               <TableCell className="text-right">${(allocation.profit_usd / 1000000).toFixed(2)}M</TableCell>
@@ -210,4 +219,8 @@ function PlanMatrix({ selectedPlan }: { selectedPlan: ReturnType<typeof selectPl
       </div>
     </div>
   );
+}
+
+function getFacilityName(facilityId: string, demoData: DemoDataResponse | null) {
+  return demoData?.facilities.find((facility) => facility.id === facilityId)?.name ?? facilityId;
 }
